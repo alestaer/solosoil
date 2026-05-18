@@ -1,4 +1,4 @@
-const API_URL = "https://alestaer.github.io/solosoil/";
+const API_URL = "https://alestaer.github.io/solosoil";
 
 // ===== MAPA =====
 const mapa = L.map('mapa').setView([40, 0], 2);
