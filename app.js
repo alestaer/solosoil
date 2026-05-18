@@ -109,22 +109,25 @@ function recalcularModo() {
 //  ÁUDIO — duas sessões independentes (A e B) + controlo de pausa
 // ---------------------------------------------------------------------
 const sessoes = { A: null, B: null };
-let slotAtivo = null;        // 'A' | 'B' | null  — qual está actualmente "em foco"
-let pausado = false;         // se o slot activo está pausado
+let slotAtivo = null;              // 'A' | 'B' | null  — qual está actualmente a emitir som
 let tokensTimer = { A: 0, B: 0 };  // anula timers obsoletos quando se re-toca
-let tempoFim   = { A: 0, B: 0 };   // ctx.currentTime esperado no fim de cada slot
 let toneIniciado = false;          // Tone.start() só pode ser chamado uma vez por gesto
+
+// Estado de pausa independente por slot (não partilha o AudioContext global)
+const slotState = {
+  A: { pausado: false, notas: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 },
+  B: { pausado: false, notas: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 },
+};
+
+function resetSlotState(slot) {
+  slotState[slot] = { pausado: false, notas: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 };
+}
 
 async function garantirToneIniciado() {
   if (!toneIniciado) {
     await Tone.start();
     toneIniciado = true;
   }
-}
-
-function ctxAudio() {
-  // O AudioContext nativo — onde suspend()/resume() existem mesmo.
-  return Tone.getContext().rawContext;
 }
 
 function criarSessao(reverbMix = 0.2) {
@@ -155,39 +158,36 @@ function destruirSessao(slot) {
   sessoes[slot] = null;
 }
 
-function silenciarOutras(slotActivo) {
-  ['A', 'B'].forEach(outroSlot => {
-    if (outroSlot === slotActivo) return;
-    const s = sessoes[outroSlot];
+function silenciarOutras(slotActual) {
+  ['A', 'B'].forEach(outro => {
+    if (outro === slotActual) return;
+    const s = sessoes[outro];
     if (!s) return;
+    // fade-out do gain (~80ms)
     try {
       const t = Tone.now();
       s.saida.gain.cancelScheduledValues(t);
-      s.saida.gain.setTargetAtTime(0, t, 0.08);  // fade-out ~80ms
+      s.saida.gain.setTargetAtTime(0, t, 0.08);
     } catch (_) {}
     try { s.piano.releaseAll(); } catch (_) {}
-    // se este slot era o activo, deixa de ser
-    if (slotAtivo === outroSlot) {
+    // só marcar como "pausado" se estava efectivamente a tocar
+    if (slotAtivo === outro) {
+      slotState[outro].pausado = true;
+      slotState[outro].tPausa = Tone.now();
+      tokensTimer[outro]++;   // invalida o timer de fim pendente
       slotAtivo = null;
-      tokensTimer[outroSlot]++;  // invalida o timer pendente
+      setEstadoMsg(outro, 'Pausado.', false);
     }
   });
 }
 
+// Toca notas num slot. Silencia o outro, agenda as notas, guarda estado por slot.
+// Devolve a duração total (segundos).
 async function tocarNotas(slot, notas, reverbMix = 0.2) {
   await garantirToneIniciado();
-  // se o contexto estava suspenso (pausa anterior ou outro motivo), retomar
-  const ctx = ctxAudio();
-  if (ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch (_) {}
-  }
-  pausado = false;
   silenciarOutras(slot);
 
-  if (!sessoes[slot]) {
-    sessoes[slot] = criarSessao(reverbMix);
-  }
-
+  if (!sessoes[slot]) sessoes[slot] = criarSessao(reverbMix);
   const sess = sessoes[slot];
   try { sess.piano.releaseAll(); } catch (_) {}
   try {
@@ -200,73 +200,118 @@ async function tocarNotas(slot, notas, reverbMix = 0.2) {
   } catch (_) {}
 
   await Tone.loaded();
-  const agora = Tone.now() + 0.15;
+  const tStart = Tone.now() + 0.15;
+  const duracaoTotal = notas.reduce((acc, n) => Math.max(acc, n.inicio + n.duracao), 0);
   notas.forEach(n => {
-    sess.piano.triggerAttackRelease(n.nota, n.duracao, agora + n.inicio, n.velocity);
+    sess.piano.triggerAttackRelease(n.nota, n.duracao, tStart + n.inicio, n.velocity);
   });
+
+  slotState[slot] = { pausado: false, notas, reverbMix, tStart, tPausa: 0, duracaoTotal };
+  slotAtivo = slot;
+  return duracaoTotal;
 }
 
 // pressionaPlay: chamado pelo botão de cada slot.
-// Toggle pausa/retoma se for o slot activo; caso contrário re-toca do início.
+// Três casos: (1) a tocar → pausar; (2) pausado → retomar; (3) inactivo → tocar do zero.
+// Pausa/retoma são 100% por slot — o AudioContext nunca é suspenso globalmente.
 async function pressionaPlay(slot) {
   const s = slot.toLowerCase();
   const dados = estado[s]?.dados;
   if (!dados) return;
 
   await garantirToneIniciado();
-  const ctx = ctxAudio();
+  const st = slotState[slot];
 
-  // ---- Slot activo: toggle pausa/retomar ----
+  // --- (1) Slot activo a tocar → pausar ---
   if (slotAtivo === slot) {
-    if (pausado) {
-      if (ctx.state === 'suspended') {
-        try { await ctx.resume(); } catch (_) {}
-      }
-      pausado = false;
+    const sess = sessoes[slot];
+    if (sess) {
+      try {
+        const t = Tone.now();
+        sess.saida.gain.cancelScheduledValues(t);
+        sess.saida.gain.setValueAtTime(0, t);   // mute imediato
+      } catch (_) {}
+      try { sess.piano.releaseAll(); } catch (_) {}
+    }
+    st.pausado = true;
+    st.tPausa = Tone.now();
+    tokensTimer[slot]++;   // invalida o timer de fim pendente
+    slotAtivo = null;
+    setEstadoMsg(slot, 'Pausado.', false);
+    actualizarBotoesPlay();
+    return;
+  }
+
+  // --- (2) Slot pausado → retomar ---
+  if (st.pausado && st.notas.length > 0) {
+    const elapsed = st.tPausa - st.tStart;
+    const notasRestantes = st.notas.filter(n => n.inicio > elapsed);
+
+    if (notasRestantes.length > 0) {
+      // Re-agendar notas que ainda não tinham tocado
+      if (!sessoes[slot]) sessoes[slot] = criarSessao(st.reverbMix);
+      const sess = sessoes[slot];
+      silenciarOutras(slot);
+      try {
+        const t = Tone.now();
+        sess.saida.gain.cancelScheduledValues(t);
+        sess.saida.gain.setTargetAtTime(1, t, 0.02);
+      } catch (_) {}
+      await Tone.loaded();
+      const tNewStart = Tone.now() + 0.15;
+      notasRestantes.forEach(n => {
+        sess.piano.triggerAttackRelease(
+          n.nota, n.duracao, tNewStart + (n.inicio - elapsed), n.velocity
+        );
+      });
+      const novaDuracao = notasRestantes.reduce(
+        (acc, n) => Math.max(acc, (n.inicio - elapsed) + n.duracao), 0
+      );
+      // actualizar estado para futuras pausas nesta sessão
+      st.pausado = false;
+      st.tStart  = tNewStart - elapsed;  // base equivalente para re-pausar correctamente
+      st.tPausa  = 0;
+      st.duracaoTotal = novaDuracao;
+      slotAtivo = slot;
+
       setEstadoMsg(slot, 'A tocar...', false);
-      // re-agenda timer de fim para o tempo restante
-      const restante = Math.max(0, tempoFim[slot] - ctx.currentTime);
       const meuToken = ++tokensTimer[slot];
       setTimeout(() => {
-        if (tokensTimer[slot] === meuToken && slotAtivo === slot && !pausado) {
+        if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
           slotAtivo = null;
           setEstadoMsg(slot, msgPronto(), false);
           actualizarBotoesPlay();
         }
-      }, restante * 1000 + 250);
+      }, novaDuracao * 1000 + 250);
     } else {
-      if (ctx.state === 'running') {
-        try { await ctx.suspend(); } catch (_) {}
-      }
-      pausado = true;
-      tokensTimer[slot]++;   // invalida o timer de fim pendente
-      setEstadoMsg(slot, 'Pausado.', false);
+      // Todas as notas já passaram — recomeçar do início
+      st.pausado = false;
+      setEstadoMsg(slot, 'A tocar...', false);
+      const duracao = await tocarNotas(slot, st.notas, st.reverbMix);
+      const meuToken = ++tokensTimer[slot];
+      setTimeout(() => {
+        if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
+          slotAtivo = null;
+          setEstadoMsg(slot, msgPronto(), false);
+          actualizarBotoesPlay();
+        }
+      }, duracao * 1000 + 250);
     }
     actualizarBotoesPlay();
     return;
   }
 
-  // ---- Slot diferente: tocar do zero ----
-  if (pausado && ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch (_) {}
-  }
-  pausado = false;
-
-  slotAtivo = slot;
+  // --- (3) Slot inactivo (nunca tocou ou já terminou) → tocar do zero ---
   setEstadoMsg(slot, 'A tocar...', false);
-  await tocarNotas(slot, dados.notas, dados.musica.reverb_mix);
-
-  const duracaoTotal = dados.notas.reduce((acc, n) => Math.max(acc, n.inicio + n.duracao), 0);
-  tempoFim[slot] = ctx.currentTime + 0.15 + duracaoTotal;
+  const duracao = await tocarNotas(slot, dados.notas, dados.musica.reverb_mix);
   const meuToken = ++tokensTimer[slot];
   setTimeout(() => {
-    if (tokensTimer[slot] === meuToken && slotAtivo === slot && !pausado) {
+    if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
       slotAtivo = null;
       setEstadoMsg(slot, msgPronto(), false);
       actualizarBotoesPlay();
     }
-  }, duracaoTotal * 1000 + 250);
-
+  }, duracao * 1000 + 250);
   actualizarBotoesPlay();
 }
 
@@ -282,13 +327,12 @@ function actualizarBotoesPlay() {
     const svg  = btn.querySelector('svg');
     if (!span || !svg) return;
 
-    const ehAtivo = slotAtivo === slot;
-    if (ehAtivo && pausado) {
-      span.textContent = 'Retomar';
-      svg.innerHTML = ICONE_PLAY;
-    } else if (ehAtivo) {
+    if (slotAtivo === slot) {
       span.textContent = 'Pausar';
       svg.innerHTML = ICONE_PAUSE;
+    } else if (slotState[slot].pausado) {
+      span.textContent = 'Retomar';
+      svg.innerHTML = ICONE_PLAY;
     } else {
       span.textContent = (estado.modo === 'comparar') ? `Tocar ${slot}` : 'Tocar de novo';
       svg.innerHTML = ICONE_PLAY;
@@ -649,7 +693,8 @@ function fecharSlot(slot) {
   if (marcadores[slot]) { mapa.removeLayer(marcadores[slot]); marcadores[slot] = null; }
   if (camadasOSM[slot]) { mapa.removeLayer(camadasOSM[slot]); camadasOSM[slot] = null; }
   estado[slot.toLowerCase()] = null;
-  if (slotAtivo === slot) { slotAtivo = null; pausado = false; }
+  if (slotAtivo === slot) slotAtivo = null;
+  resetSlotState(slot);
   tokensTimer[slot]++;
   recalcularModo();
   renderEstado();
@@ -679,6 +724,9 @@ async function selecionarPonto(lat, lon, opts = {}) {
 
   // limpar audio + camada OSM do slot
   destruirSessao(slot);
+  if (slotAtivo === slot) slotAtivo = null;
+  resetSlotState(slot);
+  tokensTimer[slot]++;
   if (camadasOSM[slot]) {
     mapa.removeLayer(camadasOSM[slot]);
     camadasOSM[slot] = null;
@@ -717,23 +765,17 @@ async function selecionarPonto(lat, lon, opts = {}) {
     setEstadoMsg(slot, 'A tocar...', false);
     renderEstado();
 
-    slotAtivo = slot;
-    pausado = false;
-    await tocarNotas(slot, dados.notas, dados.musica.reverb_mix);
+    const duracao = await tocarNotas(slot, dados.notas, dados.musica.reverb_mix);
     actualizarBotoesPlay();
 
-    const duracaoTotal = dados.notas.reduce((s, n) => Math.max(s, n.inicio + n.duracao), 0);
-    tempoFim[slot] = ctxAudio().currentTime + 0.15 + duracaoTotal;
     const meuToken = ++tokensTimer[slot];
     setTimeout(() => {
-      if (tokensTimer[slot] === meuToken &&
-          estado[slot.toLowerCase()] && estado[slot.toLowerCase()].dados === dados &&
-          slotAtivo === slot && !pausado) {
+      if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
         slotAtivo = null;
         setEstadoMsg(slot, msgPronto(), false);
         actualizarBotoesPlay();
       }
-    }, duracaoTotal * 1000 + 250);
+    }, duracao * 1000 + 250);
 
   } catch (err) {
     setEstadoMsg(slot, 'Erro: ' + err.message, false);
