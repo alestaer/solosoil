@@ -812,6 +812,17 @@
     filter: var(--partitura-filtro);
   }
 
+  /* Highlight animado da nota activa */
+  .partitura .vf-stavenote path,
+  .partitura .vf-stavenote rect {
+    transition: fill 0.06s ease, stroke 0.06s ease;
+  }
+  .partitura .vf-stavenote.nota-ativa path,
+  .partitura .vf-stavenote.nota-ativa rect {
+    fill: var(--musgo) !important;
+    stroke: var(--musgo) !important;
+  }
+
   /* ---------- LEAFLET TILES EM DARK MODE ---------- */
   .leaflet-tile-pane { filter: var(--mapa-filtro); }
 
