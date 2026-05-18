@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:5000";  // muda depois do deploy
+const API_URL = "https://alestaer.github.io/solosoil/";
 
 // ===== MAPA =====
 const mapa = L.map('mapa').setView([40, 0], 2);
