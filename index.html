@@ -53,6 +53,7 @@
     --sans:  'Inter', system-ui, -apple-system, sans-serif;
     --mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
+    /* Escala (1.25×) */
     --t-xs:   11px;
     --t-sm:   13px;
     --t-md:   15px;
@@ -61,6 +62,7 @@
     --t-2xl:  28px;
     --t-3xl:  44px;
 
+    /* Espaço (grid 8px) */
     --s-1: 4px;  --s-2: 8px;   --s-3: 12px;  --s-4: 16px;
     --s-5: 24px; --s-6: 32px;  --s-8: 48px;  --s-10: 64px;
 
@@ -129,6 +131,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
   ::selection { background: var(--musgo-claro); color: var(--tinta); }
 
   /* ============================================================
@@ -142,256 +145,48 @@
 
   /* ---------- CABEÇALHO ---------- */
   .cabecalho {
-    position: relative;
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: var(--s-6);
-    padding-bottom: var(--s-3);
-    margin-bottom: var(--s-4);
+    align-items: flex-start;
+    gap: var(--s-4);
+    padding-bottom: var(--s-5);
+    margin-bottom: var(--s-5);
     border-bottom: 1px solid var(--linha);
   }
-  .cab-esq {
+  .cabecalho .logo {
     flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    color: var(--musgo);
   }
-  .cab-dir {
-    flex: 1;
-    min-width: 0;
-    padding-left: var(--s-6);
-    border-left: 1px solid var(--linha);
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-2);
-  }
+  .cabecalho .titulo-bloco { flex: 1; min-width: 0; }
   .cabecalho h1 {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: clamp(var(--t-2xl), 5.5vw, 4.5rem);
-    line-height: 1;
-    letter-spacing: -0.04em;
-    margin: 0 0 var(--s-2);
+    font-size: clamp(var(--t-2xl), 4vw, var(--t-3xl));
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 var(--s-2) 0;
     color: var(--tinta);
-    display: flex;
-    align-items: center;
   }
   .cabecalho h1 em {
     font-style: italic;
     color: var(--musgo);
-    display: inline-flex;
-    align-items: center;
-  }
-  /* Logo SVG inline como letra 'o' */
-  .o-logo {
-    display: inline-block;
-    width: 0.78em;
-    height: 0.78em;
-    vertical-align: -0.06em;
-    color: var(--musgo);
-    line-height: 1;
-    margin: 0 0.01em;
-  }
-  .o-logo svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-  }
-  .cabecalho .tagline {
-    font-family: var(--serif);
-    font-style: italic;
-    font-weight: 400;
-    font-size: var(--t-md);
-    color: var(--musgo-escuro);
-    margin: 0;
-    letter-spacing: 0.02em;
   }
   .cabecalho .subtitulo {
-    font-family: var(--serif);
-    font-size: var(--t-sm);
-    font-style: italic;
-    line-height: 1.5;
-    color: var(--tinta-media);
     margin: 0;
+    font-size: var(--t-md);
+    color: var(--tinta-media);
+    max-width: 62ch;
   }
-  .cabecalho .creditos {
+  .cabecalho .meta {
+    flex-shrink: 0;
     font-family: var(--mono);
-    font-size: 10px;
-    color: var(--tinta-leve);
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    margin: 0;
-  }
-
-  /* ---------- TOGGLE DE TEMA ---------- */
-  .toggle-tema {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 36px;
-    height: 36px;
-    background: var(--papel-claro);
-    border: 1px solid var(--linha);
-    border-radius: var(--raio);
-    cursor: pointer;
-    color: var(--tinta-media);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all var(--transicao);
-  }
-  .toggle-tema:hover {
-    background: var(--papel-escuro);
-    color: var(--tinta);
-    transform: translateY(-1px);
-  }
-  .toggle-tema:focus-visible {
-    outline: 2px solid var(--ocre);
-    outline-offset: 2px;
-  }
-
-  /* ---------- PROCURAR ---------- */
-  .procurar {
-    position: relative;
-    margin-bottom: var(--s-5);
-  }
-  .procurar-campo {
-    position: relative;
-    display: flex;
-    align-items: center;
-    background: var(--papel-claro);
-    border: 1px solid var(--linha);
-    border-radius: var(--raio);
-    padding: 0 var(--s-3);
-    transition: border-color var(--transicao), box-shadow var(--transicao);
-  }
-  .procurar-campo:focus-within {
-    border-color: var(--musgo);
-    box-shadow: 0 0 0 3px rgba(90, 122, 58, 0.12);
-  }
-  .procurar-campo svg { color: var(--tinta-leve); flex-shrink: 0; }
-  .procurar-campo input {
-    flex: 1;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    padding: var(--s-3) var(--s-2);
-    font-family: var(--sans);
-    font-size: var(--t-sm);
-    color: var(--tinta);
-  }
-  .procurar-campo input::placeholder { color: var(--tinta-leve); }
-  .procurar-campo .proc-spinner {
-    width: 12px; height: 12px;
-    border-radius: 50%;
-    border: 2px solid var(--linha);
-    border-top-color: var(--musgo);
-    animation: girar 0.8s linear infinite;
-    margin-right: var(--s-2);
-  }
-  @keyframes girar { to { transform: rotate(360deg); } }
-
-  .procurar-resultados {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0; right: 0;
-    background: var(--papel-claro);
-    border: 1px solid var(--linha);
-    border-radius: var(--raio);
-    box-shadow: var(--sombra-lg);
-    max-height: 280px;
-    overflow-y: auto;
-    z-index: 1000;
-  }
-  .procurar-resultados[hidden] { display: none; }
-  .proc-item {
-    padding: var(--s-3) var(--s-4);
-    cursor: pointer;
-    border-bottom: 1px solid var(--linha);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    transition: background var(--transicao);
-  }
-  .proc-item:last-child { border-bottom: 0; }
-  .proc-item:hover, .proc-item.destacado { background: var(--papel-escuro); }
-  .proc-item-nome { font-size: var(--t-sm); color: var(--tinta); }
-  .proc-item-coord { font-family: var(--mono); font-size: var(--t-xs); color: var(--tinta-leve); }
-  .proc-vazio {
-    padding: var(--s-3) var(--s-4);
-    font-size: var(--t-sm);
-    color: var(--tinta-leve);
-    font-style: italic;
-  }
-
-  /* ---------- PARES SUGERIDOS ---------- */
-  .pares-suger { margin-top: var(--s-4); }
-  .pares-suger-titulo {
-    font-family: var(--sans);
     font-size: var(--t-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--musgo-escuro);
-    margin-bottom: var(--s-3);
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-  }
-  .pares-suger-titulo::before {
-    content: "";
-    width: 18px;
-    height: 1px;
-    background: var(--musgo);
-  }
-  .pares-lista {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s-3) var(--s-4);
-  }
-  .par {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-1);
-  }
-  .par-chip {
-    font-family: var(--sans);
-    font-size: var(--t-sm);
-    padding: 6px 12px;
-    background: var(--papel-claro);
-    border: 1px solid var(--linha);
-    border-left-width: 3px;
-    border-radius: var(--raio-sm);
-    color: var(--tinta);
-    cursor: pointer;
-    transition: all var(--transicao);
-    line-height: 1.3;
-  }
-  .par-chip:hover {
-    background: var(--papel-escuro);
-    transform: translateY(-1px);
-    box-shadow: var(--sombra-sm);
-  }
-  .par-chip:focus-visible { outline: 2px solid var(--ocre); outline-offset: 2px; }
-  .par-chip-interv { border-left-color: var(--ferrugem); }
-  .par-chip-prist  { border-left-color: var(--musgo); }
-  .par-vs {
-    font-family: var(--serif);
-    font-style: italic;
     color: var(--tinta-leve);
-    font-size: var(--t-sm);
-    position: relative;
-    padding: 0 var(--s-3);
-    user-select: none;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-align: right;
   }
-  .par-vs::before, .par-vs::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    width: 6px;
-    height: 1px;
-    background: var(--linha);
-  }
-  .par-vs::before { left: -1px; }
-  .par-vs::after  { right: -1px; }
 
   /* ---------- MAPA ---------- */
   .mapa-wrap {
@@ -410,7 +205,8 @@
   }
   .mapa-dica {
     position: absolute;
-    top: var(--s-4); left: var(--s-4);
+    top: var(--s-4);
+    left: var(--s-4);
     z-index: 500;
     display: inline-flex;
     align-items: center;
@@ -429,143 +225,12 @@
   .mapa-dica.escondida { opacity: 0; }
   .mapa-dica svg { color: var(--musgo); flex-shrink: 0; }
 
-  /* ---------- MARCADORES A / B ---------- */
-  .marcador-ab { background: transparent; border: 0; }
-  .m-ab {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--mono);
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--papel-claro);
-    border: 2px solid var(--papel-claro);
-    box-shadow: 0 2px 6px rgba(43, 37, 28, 0.35);
-    letter-spacing: 0;
-  }
-  .m-ab-a { background: var(--musgo); }
-  .m-ab-b { background: var(--petroleo); }
-
-  /* ---------- POPOVER (substituir A ou B?) ---------- */
-  .popover-substituir {
-    position: absolute;
-    z-index: 1200;
-    width: 240px;
-    background: var(--papel-claro);
-    border: 1px solid var(--linha);
-    border-radius: var(--raio);
-    box-shadow: var(--sombra-lg);
-    padding: var(--s-4);
-    font-family: var(--sans);
-    animation: popover-entrar 160ms cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  @keyframes popover-entrar {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .popover-titulo {
-    font-size: var(--t-sm);
-    color: var(--tinta);
-    margin-bottom: var(--s-2);
-    line-height: 1.4;
-  }
-  .popover-coord {
-    font-family: var(--mono);
-    font-size: var(--t-xs);
-    color: var(--tinta-leve);
-    margin-bottom: var(--s-3);
-  }
-  .popover-botoes {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--s-2);
-    margin-bottom: var(--s-2);
-  }
-  .popover-btn {
-    font-family: var(--sans);
-    font-size: var(--t-xs);
-    font-weight: 500;
-    padding: var(--s-2) var(--s-2);
-    border-radius: var(--raio-sm);
-    cursor: pointer;
-    color: var(--papel-claro);
-    border: 1px solid transparent;
-    transition: all var(--transicao);
-  }
-  .popover-btn.popover-a { background: var(--musgo); border-color: var(--musgo); }
-  .popover-btn.popover-b { background: var(--petroleo); border-color: var(--petroleo); }
-  .popover-btn:hover { transform: translateY(-1px); box-shadow: var(--sombra-sm); }
-  .popover-cancelar {
-    width: 100%;
-    font-family: var(--sans);
-    font-size: var(--t-xs);
-    padding: var(--s-2);
-    background: transparent;
-    border: 1px solid var(--linha);
-    border-radius: var(--raio-sm);
-    color: var(--tinta-media);
-    cursor: pointer;
-    transition: background var(--transicao);
-  }
-  .popover-cancelar:hover { background: var(--papel-escuro); }
-
-  /* ---------- PAINEL (container A/B) ---------- */
-  .painel-container {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--s-5);
-  }
-  .painel-container.comparar {
-    grid-template-columns: 1fr 1fr;
-  }
-  .painel.lado {
+  /* ---------- PAINEL ---------- */
+  .painel {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: var(--s-4);
-    min-width: 0;
   }
-  .painel-container.comparar .painel.lado {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .lado-cab {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s-3);
-    padding: var(--s-2) var(--s-3);
-    background: var(--papel-claro);
-    border: 1px solid var(--linha);
-    border-radius: var(--raio);
-    box-shadow: var(--sombra-sm);
-  }
-  .painel-container:not(.comparar) .lado-cab { display: none; }
-  .lado-tag {
-    font-family: var(--mono);
-    font-weight: 600;
-    font-size: var(--t-sm);
-    color: var(--papel-claro);
-    background: var(--musgo);
-    padding: 3px 12px;
-    border-radius: var(--raio-sm);
-    letter-spacing: 0.08em;
-  }
-  .lado-b .lado-tag { background: var(--petroleo); }
-  .btn-fechar {
-    font-family: var(--sans);
-    font-size: var(--t-xs);
-    background: transparent;
-    border: 1px solid var(--linha);
-    border-radius: var(--raio-sm);
-    padding: 4px 10px;
-    color: var(--tinta-media);
-    cursor: pointer;
-    transition: all var(--transicao);
-  }
-  .btn-fechar:hover { background: var(--papel-escuro); color: var(--tinta); }
-
-  /* ---------- CAIXA ---------- */
   .caixa {
     background: var(--papel-claro);
     border: 1px solid var(--linha);
@@ -596,8 +261,6 @@
     height: 1px;
     background: var(--musgo);
   }
-  .lado-b .caixa h3 { color: var(--petroleo); }
-  .lado-b .caixa h3::before { background: var(--petroleo); }
 
   /* ---------- LOCALIZAÇÃO / ESTADO ---------- */
   .coord {
@@ -621,24 +284,18 @@
     width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--musgo);
-    margin-right: 22px;   /* espaço para os 3 pontos não colidirem com o texto */
-    flex-shrink: 0;
     animation: pulse 1.4s ease-in-out infinite;
     box-shadow:
       10px 0 0 var(--musgo),
       20px 0 0 var(--musgo);
-  }
-  .lado-b .estado.carregando::before {
-    background: var(--petroleo);
-    box-shadow: 10px 0 0 var(--petroleo), 20px 0 0 var(--petroleo);
   }
   @keyframes pulse {
     0%, 100% { opacity: 0.25; }
     50%      { opacity: 1; }
   }
 
-  /* ---------- BOTÃO TOCAR ---------- */
-  .btn-tocar {
+  /* ---------- BOTÃO ---------- */
+  button#btn-tocar {
     display: inline-flex;
     align-items: center;
     gap: var(--s-2);
@@ -655,34 +312,29 @@
     transition: all var(--transicao);
     margin-bottom: var(--s-4);
   }
-  .lado-b .btn-tocar { border-color: var(--petroleo); background: var(--petroleo); }
-  .btn-tocar svg {
+  button#btn-tocar svg {
     width: 14px; height: 14px;
     transition: transform var(--transicao);
   }
-  .btn-tocar:hover:not(:disabled) {
+  button#btn-tocar:hover:not(:disabled) {
     background: var(--musgo-escuro);
     border-color: var(--musgo-escuro);
     transform: translateY(-1px);
     box-shadow: var(--sombra);
   }
-  .lado-b .btn-tocar:hover:not(:disabled) {
-    background: #244a55;
-    border-color: #244a55;
-  }
-  .btn-tocar:hover:not(:disabled) svg { transform: scale(1.15); }
-  .btn-tocar:focus-visible {
+  button#btn-tocar:hover:not(:disabled) svg { transform: scale(1.15); }
+  button#btn-tocar:focus-visible {
     outline: 2px solid var(--ocre);
     outline-offset: 2px;
   }
-  .btn-tocar:disabled {
+  button#btn-tocar:disabled {
     opacity: 0.45;
     cursor: not-allowed;
     background: var(--papel-escuro);
     color: var(--tinta-leve);
     border-color: var(--linha);
   }
-  .btn-tocar:not(:disabled) {
+  button#btn-tocar:not(:disabled) {
     animation: pulsar-botao 2.6s ease-in-out infinite;
   }
   @keyframes pulsar-botao {
@@ -690,7 +342,7 @@
     50%      { box-shadow: 0 0 0 6px rgba(90, 122, 58, 0.12); }
   }
 
-  /* ---------- PARÂMETROS ---------- */
+  /* ---------- PARÂMETROS (barras) ---------- */
   .param {
     display: grid;
     grid-template-columns: 110px 1fr 70px;
@@ -713,6 +365,7 @@
     overflow: hidden;
   }
   .param .barra::before {
+    /* marca central (≈ valor neutro / mediano) */
     content: "";
     position: absolute;
     top: -2px; bottom: -2px;
@@ -728,9 +381,6 @@
     background: linear-gradient(90deg, var(--musgo), var(--musgo-escuro));
     border-radius: 3px;
     transition: width 600ms cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .lado-b .param .barra > div {
-    background: linear-gradient(90deg, var(--petroleo), #244a55);
   }
   .param .valor {
     font-family: var(--mono);
@@ -839,34 +489,22 @@
      RESPONSIVO
      ============================================================ */
   @media (max-width: 1200px) {
-    .painel.lado { grid-template-columns: repeat(2, 1fr); }
+    .painel { grid-template-columns: repeat(2, 1fr); }
   }
   @media (max-width: 768px) {
     .pagina { padding: var(--s-4) var(--s-3) var(--s-6); }
     .cabecalho {
       flex-direction: column;
-      align-items: flex-start;
       gap: var(--s-3);
     }
-    .cab-dir {
-      padding-left: 0;
-      border-left: 0;
-      border-top: 1px solid var(--linha);
-      padding-top: var(--s-3);
-      width: 100%;
-    }
-    .toggle-tema { width: 32px; height: 32px; }
-    .painel-container.comparar { grid-template-columns: 1fr; }
-    .painel.lado,
-    .painel-container.comparar .painel.lado { grid-template-columns: 1fr; }
+    .cabecalho .meta { text-align: left; }
+    .painel { grid-template-columns: 1fr; }
     .param { grid-template-columns: 90px 1fr 60px; gap: var(--s-2); }
     #mapa { height: 360px; }
-    .pares-lista { gap: var(--s-3); }
-    .par { flex-wrap: wrap; }
   }
 
   /* ============================================================
-     LEAFLET — retoques
+     LEAFLET — pequenos retoques
      ============================================================ */
   .leaflet-container {
     font-family: var(--sans);
@@ -889,49 +527,32 @@
 <div class="pagina">
 
   <header class="cabecalho">
-    <button class="toggle-tema" id="toggle-tema" aria-label="Alternar tema"></button>
+    <!-- Logo: ondas sonoras + horizontes de solo -->
+    <svg class="logo" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+      <circle cx="28" cy="28" r="26" stroke="currentColor" stroke-width="1.2" opacity="0.35"/>
+      <!-- horizontes de solo -->
+      <path d="M6 34 Q 28 30 50 34" stroke="currentColor" stroke-width="1.4" fill="none"/>
+      <path d="M6 40 Q 28 36 50 40" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.7"/>
+      <path d="M6 46 Q 28 42 50 46" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.45"/>
+      <!-- onda sonora -->
+      <path d="M14 22 Q 18 14 22 22 T 30 22 T 38 22 T 46 22"
+            stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      <circle cx="28" cy="22" r="1.8" fill="currentColor"/>
+    </svg>
 
-    <div class="cab-esq">
-      <h1>Solo<em>S<span class="o-logo" aria-label="o"><svg viewBox="0 0 56 56" fill="none" aria-hidden="true">
-          <circle cx="28" cy="28" r="26" stroke="currentColor" stroke-width="1.2" opacity="0.35"/>
-          <path d="M6 34 Q 28 30 50 34" stroke="currentColor" stroke-width="1.4" fill="none"/>
-          <path d="M6 40 Q 28 36 50 40" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.7"/>
-          <path d="M6 46 Q 28 42 50 46" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.45"/>
-          <path d="M14 22 Q 18 14 22 22 T 30 22 T 38 22 T 46 22"
-                stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-          <circle cx="28" cy="22" r="1.8" fill="currentColor"/>
-        </svg></span>il</em></h1>
-      <p class="tagline">Solo a solo</p>
-    </div>
-
-    <div class="cab-dir">
+    <div class="titulo-bloco">
+      <h1>Curiou<em>Soil</em></h1>
       <p class="subtitulo">
         Uma escuta do solo. Clica em qualquer ponto do mapa para ouvir como soa
-        a terra naquele lugar — acidez, textura, matéria orgânica e as pressões
-        humanas próximas, traduzidas em piano em tempo real.
+        a terra naquele lugar — a sua acidez, textura, matéria orgânica e as
+        pressões humanas próximas, traduzidas em piano em tempo real.
       </p>
-      <p class="creditos">SoilGrids · OpenStreetMap</p>
+    </div>
+
+    <div class="meta">
+      Dados<br>SoilGrids · OSM
     </div>
   </header>
-
-  <!-- ============== PROCURAR + PARES ============== -->
-  <section class="procurar">
-    <div class="procurar-campo">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="11" cy="11" r="7"/>
-        <path d="M21 21l-4.3-4.3"/>
-      </svg>
-      <input id="procurar-input" type="text" autocomplete="off"
-             placeholder="Procurar lugar ou coordenadas (ex: Chernobyl, ou 40.12, -8.45)">
-      <div class="proc-spinner" id="proc-spinner" hidden></div>
-    </div>
-    <div class="procurar-resultados" id="procurar-resultados" hidden></div>
-
-    <div class="pares-suger">
-      <div class="pares-suger-titulo">Pares de contraste</div>
-      <div class="pares-lista" id="pares-lista"></div>
-    </div>
-  </section>
 
   <div class="mapa-wrap">
     <div id="mapa"></div>
@@ -944,19 +565,54 @@
     </div>
   </div>
 
-  <!-- ============== PAINEL A / B ============== -->
-  <div class="painel-container" id="painel-container"></div>
+  <div class="painel">
+
+    <div class="caixa">
+      <h3>Localização</h3>
+      <p class="coord" id="coord">— · —</p>
+      <p class="estado" id="estado"></p>
+      <button id="btn-tocar" disabled>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M6 4l14 8-14 8z"/>
+        </svg>
+        Tocar de novo
+      </button>
+      <div id="avisos-bloco"></div>
+    </div>
+
+    <div class="caixa">
+      <h3>Parâmetros do solo</h3>
+      <div id="solo-params"><p class="placeholder">Ainda sem leitura. Clica no mapa para começar.</p></div>
+    </div>
+
+    <div class="caixa">
+      <h3>Pressão humana próxima</h3>
+      <div id="pressao-humana"><p class="placeholder">Ainda sem leitura.</p></div>
+    </div>
+
+    <div class="caixa">
+      <h3>Parâmetros musicais</h3>
+      <div id="musica-params"><p class="placeholder">Ainda sem leitura.</p></div>
+    </div>
+
+    <div class="caixa larga partitura">
+      <h3>Partitura</h3>
+      <div id="partitura"></div>
+    </div>
+
+  </div>
 
 </div>
 
 <script>
-  // Esconde a dica do mapa após o primeiro clique (mantém comportamento original).
+  // Esconde a dica do mapa após o primeiro clique. Não toca em nada do app.js.
   document.addEventListener('DOMContentLoaded', () => {
     const dica = document.getElementById('mapa-dica');
     const mapaDiv = document.getElementById('mapa');
     if (!dica || !mapaDiv) return;
     const esconder = () => dica.classList.add('escondida');
     mapaDiv.addEventListener('click', esconder, { once: true });
+    // fallback: esconde após 12s mesmo sem clique
     setTimeout(esconder, 12000);
   });
 </script>
