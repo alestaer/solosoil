@@ -112,6 +112,20 @@ const sessoes = { A: null, B: null };
 let slotAtivo = null;        // 'A' | 'B' | null  — qual está actualmente "em foco"
 let pausado = false;         // se o slot activo está pausado
 let tokensTimer = { A: 0, B: 0 };  // anula timers obsoletos quando se re-toca
+let tempoFim   = { A: 0, B: 0 };   // ctx.currentTime esperado no fim de cada slot
+let toneIniciado = false;          // Tone.start() só pode ser chamado uma vez por gesto
+
+async function garantirToneIniciado() {
+  if (!toneIniciado) {
+    await Tone.start();
+    toneIniciado = true;
+  }
+}
+
+function ctxAudio() {
+  // O AudioContext nativo — onde suspend()/resume() existem mesmo.
+  return Tone.getContext().rawContext;
+}
 
 function criarSessao(reverbMix = 0.2) {
   const saida  = new Tone.Gain(1).toDestination();
@@ -161,11 +175,13 @@ function silenciarOutras(slotActivo) {
 }
 
 async function tocarNotas(slot, notas, reverbMix = 0.2) {
-  await Tone.start();
-  // se o contexto estava suspenso (pausa anterior), retomar antes de agendar
-  if (Tone.context.state === 'suspended') {
-    try { await Tone.context.resume(); } catch (_) {}
+  await garantirToneIniciado();
+  // se o contexto estava suspenso (pausa anterior ou outro motivo), retomar
+  const ctx = ctxAudio();
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch (_) {}
   }
+  pausado = false;
   silenciarOutras(slot);
 
   if (!sessoes[slot]) {
@@ -191,41 +207,57 @@ async function tocarNotas(slot, notas, reverbMix = 0.2) {
 }
 
 // pressionaPlay: chamado pelo botão de cada slot.
-// Comporta-se como toggle (pausa/retoma) se for o slot activo;
-// caso contrário re-toca o slot do início.
+// Toggle pausa/retoma se for o slot activo; caso contrário re-toca do início.
 async function pressionaPlay(slot) {
   const s = slot.toLowerCase();
   const dados = estado[s]?.dados;
   if (!dados) return;
 
-  await Tone.start();
+  await garantirToneIniciado();
+  const ctx = ctxAudio();
 
-  // mesmo slot activo → toggle pausa/retomar
+  // ---- Slot activo: toggle pausa/retomar ----
   if (slotAtivo === slot) {
     if (pausado) {
-      try { await Tone.context.resume(); } catch (_) {}
+      if (ctx.state === 'suspended') {
+        try { await ctx.resume(); } catch (_) {}
+      }
       pausado = false;
       setEstadoMsg(slot, 'A tocar...', false);
+      // re-agenda timer de fim para o tempo restante
+      const restante = Math.max(0, tempoFim[slot] - ctx.currentTime);
+      const meuToken = ++tokensTimer[slot];
+      setTimeout(() => {
+        if (tokensTimer[slot] === meuToken && slotAtivo === slot && !pausado) {
+          slotAtivo = null;
+          setEstadoMsg(slot, msgPronto(), false);
+          actualizarBotoesPlay();
+        }
+      }, restante * 1000 + 250);
     } else {
-      try { await Tone.context.suspend(); } catch (_) {}
+      if (ctx.state === 'running') {
+        try { await ctx.suspend(); } catch (_) {}
+      }
       pausado = true;
+      tokensTimer[slot]++;   // invalida o timer de fim pendente
       setEstadoMsg(slot, 'Pausado.', false);
     }
     actualizarBotoesPlay();
     return;
   }
 
-  // outro slot → começar do zero
-  if (pausado) {
-    try { await Tone.context.resume(); } catch (_) {}
-    pausado = false;
+  // ---- Slot diferente: tocar do zero ----
+  if (pausado && ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch (_) {}
   }
+  pausado = false;
 
   slotAtivo = slot;
   setEstadoMsg(slot, 'A tocar...', false);
   await tocarNotas(slot, dados.notas, dados.musica.reverb_mix);
 
   const duracaoTotal = dados.notas.reduce((acc, n) => Math.max(acc, n.inicio + n.duracao), 0);
+  tempoFim[slot] = ctx.currentTime + 0.15 + duracaoTotal;
   const meuToken = ++tokensTimer[slot];
   setTimeout(() => {
     if (tokensTimer[slot] === meuToken && slotAtivo === slot && !pausado) {
@@ -691,6 +723,7 @@ async function selecionarPonto(lat, lon, opts = {}) {
     actualizarBotoesPlay();
 
     const duracaoTotal = dados.notas.reduce((s, n) => Math.max(s, n.inicio + n.duracao), 0);
+    tempoFim[slot] = ctxAudio().currentTime + 0.15 + duracaoTotal;
     const meuToken = ++tokensTimer[slot];
     setTimeout(() => {
       if (tokensTimer[slot] === meuToken &&
