@@ -36,7 +36,7 @@ const PARES_SUGERIDOS = [
   {
     titulo: "Acidente nuclear vs floresta primária temperada",
     intervencionado: {
-      nome: "Chernobyl (zona de exclusão)", lat: 51.389, lon: 30.099,
+      nome: "Chernobyl (zona de exclusão)", lat: 51.415, lon: 30.220,
       porque: "Solo contaminado por radionuclídeos desde 1986"
     },
     pristino: {
@@ -106,9 +106,12 @@ function recalcularModo() {
 }
 
 // ---------------------------------------------------------------------
-//  ÁUDIO — duas sessões independentes (A e B)
+//  ÁUDIO — duas sessões independentes (A e B) + controlo de pausa
 // ---------------------------------------------------------------------
 const sessoes = { A: null, B: null };
+let slotAtivo = null;        // 'A' | 'B' | null  — qual está actualmente "em foco"
+let pausado = false;         // se o slot activo está pausado
+let tokensTimer = { A: 0, B: 0 };  // anula timers obsoletos quando se re-toca
 
 function criarSessao(reverbMix = 0.2) {
   const saida  = new Tone.Gain(1).toDestination();
@@ -149,11 +152,20 @@ function silenciarOutras(slotActivo) {
       s.saida.gain.setTargetAtTime(0, t, 0.08);  // fade-out ~80ms
     } catch (_) {}
     try { s.piano.releaseAll(); } catch (_) {}
+    // se este slot era o activo, deixa de ser
+    if (slotAtivo === outroSlot) {
+      slotAtivo = null;
+      tokensTimer[outroSlot]++;  // invalida o timer pendente
+    }
   });
 }
 
 async function tocarNotas(slot, notas, reverbMix = 0.2) {
   await Tone.start();
+  // se o contexto estava suspenso (pausa anterior), retomar antes de agendar
+  if (Tone.context.state === 'suspended') {
+    try { await Tone.context.resume(); } catch (_) {}
+  }
   silenciarOutras(slot);
 
   if (!sessoes[slot]) {
@@ -175,6 +187,80 @@ async function tocarNotas(slot, notas, reverbMix = 0.2) {
   const agora = Tone.now() + 0.15;
   notas.forEach(n => {
     sess.piano.triggerAttackRelease(n.nota, n.duracao, agora + n.inicio, n.velocity);
+  });
+}
+
+// pressionaPlay: chamado pelo botão de cada slot.
+// Comporta-se como toggle (pausa/retoma) se for o slot activo;
+// caso contrário re-toca o slot do início.
+async function pressionaPlay(slot) {
+  const s = slot.toLowerCase();
+  const dados = estado[s]?.dados;
+  if (!dados) return;
+
+  await Tone.start();
+
+  // mesmo slot activo → toggle pausa/retomar
+  if (slotAtivo === slot) {
+    if (pausado) {
+      try { await Tone.context.resume(); } catch (_) {}
+      pausado = false;
+      setEstadoMsg(slot, 'A tocar...', false);
+    } else {
+      try { await Tone.context.suspend(); } catch (_) {}
+      pausado = true;
+      setEstadoMsg(slot, 'Pausado.', false);
+    }
+    actualizarBotoesPlay();
+    return;
+  }
+
+  // outro slot → começar do zero
+  if (pausado) {
+    try { await Tone.context.resume(); } catch (_) {}
+    pausado = false;
+  }
+
+  slotAtivo = slot;
+  setEstadoMsg(slot, 'A tocar...', false);
+  await tocarNotas(slot, dados.notas, dados.musica.reverb_mix);
+
+  const duracaoTotal = dados.notas.reduce((acc, n) => Math.max(acc, n.inicio + n.duracao), 0);
+  const meuToken = ++tokensTimer[slot];
+  setTimeout(() => {
+    if (tokensTimer[slot] === meuToken && slotAtivo === slot && !pausado) {
+      slotAtivo = null;
+      setEstadoMsg(slot, msgPronto(), false);
+      actualizarBotoesPlay();
+    }
+  }, duracaoTotal * 1000 + 250);
+
+  actualizarBotoesPlay();
+}
+
+const ICONE_PLAY  = '<path d="M6 4l14 8-14 8z"/>';
+const ICONE_PAUSE = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>';
+
+function actualizarBotoesPlay() {
+  ['A', 'B'].forEach(slot => {
+    const s = slot.toLowerCase();
+    const btn = document.getElementById(`btn-tocar-${s}`);
+    if (!btn) return;
+    const span = btn.querySelector('.btn-label');
+    const svg  = btn.querySelector('svg');
+    if (!span || !svg) return;
+
+    const ehAtivo = slotAtivo === slot;
+    if (ehAtivo && pausado) {
+      span.textContent = 'Retomar';
+      svg.innerHTML = ICONE_PLAY;
+    } else if (ehAtivo) {
+      span.textContent = 'Pausar';
+      svg.innerHTML = ICONE_PAUSE;
+    } else {
+      span.textContent = (estado.modo === 'comparar') ? `Tocar ${slot}` : 'Tocar de novo';
+      svg.innerHTML = ICONE_PLAY;
+    }
   });
 }
 
@@ -418,7 +504,7 @@ function htmlPainel(slot) {
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M6 4l14 8-14 8z"/>
           </svg>
-          ${labelBtn}
+          <span class="btn-label">${labelBtn}</span>
         </button>
         <div id="avisos-bloco-${s}"></div>
       </div>
@@ -490,20 +576,10 @@ function renderEstado() {
       }
     }
 
-    // botão tocar
+    // botão tocar / pausar / retomar
     const btn = document.getElementById(`btn-tocar-${s}`);
     if (btn) {
-      btn.addEventListener('click', () => {
-        const slotData = estado[s];
-        if (slotData?.dados?.notas) {
-          setEstadoMsg(slot, 'A tocar...');
-          tocarNotas(slot, slotData.dados.notas, slotData.dados.musica.reverb_mix);
-          const duracao = slotData.dados.notas.reduce((acc, n) => Math.max(acc, n.inicio + n.duracao), 0);
-          setTimeout(() => {
-            if (estado[s] === slotData) setEstadoMsg(slot, msgPronto());
-          }, duracao * 1000);
-        }
-      });
+      btn.addEventListener('click', () => pressionaPlay(slot));
     }
 
     // botão fechar (só B)
@@ -541,8 +617,11 @@ function fecharSlot(slot) {
   if (marcadores[slot]) { mapa.removeLayer(marcadores[slot]); marcadores[slot] = null; }
   if (camadasOSM[slot]) { mapa.removeLayer(camadasOSM[slot]); camadasOSM[slot] = null; }
   estado[slot.toLowerCase()] = null;
+  if (slotAtivo === slot) { slotAtivo = null; pausado = false; }
+  tokensTimer[slot]++;
   recalcularModo();
   renderEstado();
+  actualizarBotoesPlay();
 }
 
 // ---------------------------------------------------------------------
@@ -606,15 +685,22 @@ async function selecionarPonto(lat, lon, opts = {}) {
     setEstadoMsg(slot, 'A tocar...', false);
     renderEstado();
 
+    slotAtivo = slot;
+    pausado = false;
     await tocarNotas(slot, dados.notas, dados.musica.reverb_mix);
+    actualizarBotoesPlay();
 
     const duracaoTotal = dados.notas.reduce((s, n) => Math.max(s, n.inicio + n.duracao), 0);
+    const meuToken = ++tokensTimer[slot];
     setTimeout(() => {
-      // só actualiza se ainda for a mesma amostra
-      if (estado[slot.toLowerCase()] && estado[slot.toLowerCase()].dados === dados) {
+      if (tokensTimer[slot] === meuToken &&
+          estado[slot.toLowerCase()] && estado[slot.toLowerCase()].dados === dados &&
+          slotAtivo === slot && !pausado) {
+        slotAtivo = null;
         setEstadoMsg(slot, msgPronto(), false);
+        actualizarBotoesPlay();
       }
-    }, duracaoTotal * 1000);
+    }, duracaoTotal * 1000 + 250);
 
   } catch (err) {
     setEstadoMsg(slot, 'Erro: ' + err.message, false);
@@ -868,7 +954,34 @@ function renderParesSugeridos() {
 }
 
 // ---------------------------------------------------------------------
+//  TOGGLE DE TEMA (claro / escuro)
+// ---------------------------------------------------------------------
+const ICONE_LUA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+const ICONE_SOL = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+
+function actualizarIconeTema() {
+  const btn = document.getElementById('toggle-tema');
+  if (!btn) return;
+  const ehEscuro = document.documentElement.getAttribute('data-tema') === 'escuro';
+  btn.innerHTML = ehEscuro ? ICONE_SOL : ICONE_LUA;
+  btn.title = ehEscuro ? 'Mudar para tema claro' : 'Mudar para tema escuro';
+}
+
+document.getElementById('toggle-tema')?.addEventListener('click', () => {
+  const ehEscuro = document.documentElement.getAttribute('data-tema') === 'escuro';
+  if (ehEscuro) {
+    document.documentElement.removeAttribute('data-tema');
+    try { localStorage.setItem('curiosoil-tema', 'claro'); } catch (_) {}
+  } else {
+    document.documentElement.setAttribute('data-tema', 'escuro');
+    try { localStorage.setItem('curiosoil-tema', 'escuro'); } catch (_) {}
+  }
+  actualizarIconeTema();
+});
+
+// ---------------------------------------------------------------------
 //  ARRANQUE
 // ---------------------------------------------------------------------
+actualizarIconeTema();
 renderParesSugeridos();
 renderEstado();   // pinta um shell vazio para a amostra A
