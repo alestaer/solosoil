@@ -123,6 +123,46 @@ function resetSlotState(slot) {
   slotState[slot] = { pausado: false, notas: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 };
 }
 
+// Timing e elementos SVG das notas de cada slot (para highlight sincronizado)
+const partituraInfo = {
+  A: { els: [], timings: [] },
+  B: { els: [], timings: [] },
+};
+const highlightTimers = { A: [], B: [] };
+
+// Cancela timers de highlight e remove a classe visual
+function limparHighlights(slot) {
+  highlightTimers[slot].forEach(id => clearTimeout(id));
+  highlightTimers[slot] = [];
+  (partituraInfo[slot]?.els || []).forEach(el => el.classList.remove('nota-ativa'));
+}
+
+// Agenda os timeouts que acendem cada nota, com offset de 'elapsed' segundos
+function agendarHighlights(slot, elapsed = 0) {
+  limparHighlights(slot);
+  const info = partituraInfo[slot];
+  if (!info?.els.length) return;
+
+  info.timings.forEach((t, i) => {
+    if (t.inicio < elapsed - 0.05) return;   // já passou
+    const delay = Math.max(0, (t.inicio - elapsed + 0.15) * 1000);
+    const id = setTimeout(() => {
+      (partituraInfo[slot]?.els || []).forEach(el => el.classList.remove('nota-ativa'));
+      partituraInfo[slot]?.els[i]?.classList.add('nota-ativa');
+    }, delay);
+    highlightTimers[slot].push(id);
+  });
+
+  // Remove o highlight quando a melodia termina
+  const fimRestante = info.timings
+    .filter(t => t.inicio >= elapsed - 0.05)
+    .reduce((acc, t) => Math.max(acc, t.inicio - elapsed + t.duracao), 0);
+  const endId = setTimeout(() => {
+    (partituraInfo[slot]?.els || []).forEach(el => el.classList.remove('nota-ativa'));
+  }, (fimRestante + 0.15 + 0.4) * 1000);
+  highlightTimers[slot].push(endId);
+}
+
 async function garantirToneIniciado() {
   if (!toneIniciado) {
     await Tone.start();
@@ -176,6 +216,9 @@ function silenciarOutras(slotActual) {
       slotState[outro].tPausa = Tone.now();
       tokensTimer[outro]++;   // invalida o timer de fim pendente
       slotAtivo = null;
+      // Cancela timers futuros mas mantém o highlight na última nota tocada
+      highlightTimers[outro].forEach(id => clearTimeout(id));
+      highlightTimers[outro] = [];
       setEstadoMsg(outro, 'Pausado.', false);
     }
   });
@@ -208,6 +251,7 @@ async function tocarNotas(slot, notas, reverbMix = 0.2) {
 
   slotState[slot] = { pausado: false, notas, reverbMix, tStart, tPausa: 0, duracaoTotal };
   slotAtivo = slot;
+  agendarHighlights(slot, 0);
   return duracaoTotal;
 }
 
@@ -237,6 +281,9 @@ async function pressionaPlay(slot) {
     st.tPausa = Tone.now();
     tokensTimer[slot]++;   // invalida o timer de fim pendente
     slotAtivo = null;
+    // Cancela timers futuros mas mantém o highlight visual na nota actual
+    highlightTimers[slot].forEach(id => clearTimeout(id));
+    highlightTimers[slot] = [];
     setEstadoMsg(slot, 'Pausado.', false);
     actualizarBotoesPlay();
     return;
@@ -273,6 +320,7 @@ async function pressionaPlay(slot) {
       st.tPausa  = 0;
       st.duracaoTotal = novaDuracao;
       slotAtivo = slot;
+      agendarHighlights(slot, elapsed);
 
       setEstadoMsg(slot, 'A tocar...', false);
       const meuToken = ++tokensTimer[slot];
@@ -535,22 +583,32 @@ function desenharPartitura(slot, notas) {
   const stave = new VF.Stave(10, 40, largura - 20);
   stave.addClef('treble').setContext(context).draw();
 
-  const notasVF = notas.slice(0, limite).map(n => {
+  // Constrói notas VexFlow e guarda o timing de cada uma para o highlight
+  const timings = [];
+  const notasVF = [];
+  notas.slice(0, limite).forEach(n => {
     const match = n.nota.match(/^([A-G]#?)(\d+)$/);
-    if (!match) return null;
+    if (!match) return;
     const chave = `${match[1].toLowerCase()}/${match[2]}`;
     const duracaoVF = n.duracao >= 1 ? 'q' : (n.duracao >= 0.5 ? '8' : '16');
     const nota = new VF.StaveNote({ clef: 'treble', keys: [chave], duration: duracaoVF });
     if (match[1].includes('#')) nota.addModifier(new VF.Accidental('#'), 0);
-    return nota;
-  }).filter(n => n !== null);
+    notasVF.push(nota);
+    timings.push({ inicio: n.inicio, duracao: n.duracao });
+  });
 
   try {
     VF.Formatter.FormatAndDraw(context, stave, notasVF);
   } catch (e) {
     console.error('Erro VexFlow:', e);
     div.innerHTML = '<p class="placeholder">Não foi possível desenhar a pauta.</p>';
+    partituraInfo[slot] = { els: [], timings: [] };
+    return;
   }
+
+  // Mapeia elementos SVG → timing (índice 1:1 com notasVF)
+  const els = Array.from(div.querySelectorAll('.vf-stavenote'));
+  partituraInfo[slot] = { els, timings };
 }
 
 // ---------------------------------------------------------------------
@@ -694,6 +752,7 @@ function fecharSlot(slot) {
   if (camadasOSM[slot]) { mapa.removeLayer(camadasOSM[slot]); camadasOSM[slot] = null; }
   estado[slot.toLowerCase()] = null;
   if (slotAtivo === slot) slotAtivo = null;
+  limparHighlights(slot);
   resetSlotState(slot);
   tokensTimer[slot]++;
   recalcularModo();
@@ -725,6 +784,7 @@ async function selecionarPonto(lat, lon, opts = {}) {
   // limpar audio + camada OSM do slot
   destruirSessao(slot);
   if (slotAtivo === slot) slotAtivo = null;
+  limparHighlights(slot);
   resetSlotState(slot);
   tokensTimer[slot]++;
   if (camadasOSM[slot]) {
