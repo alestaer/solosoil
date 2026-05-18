@@ -14,6 +14,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
 
+<!-- Aplicar tema antes do paint (evita flash) -->
+<script>
+  (function () {
+    try {
+      const t = localStorage.getItem('curiosoil-tema');
+      if (t === 'escuro') document.documentElement.setAttribute('data-tema', 'escuro');
+    } catch (_) {}
+  })();
+</script>
+
 <style>
   /* ============================================================
      TOKENS
@@ -63,6 +73,41 @@
     --sombra-lg: 0 8px 24px rgba(43, 37, 28, 0.12), 0 2px 6px rgba(43, 37, 28, 0.06);
 
     --transicao: 220ms cubic-bezier(0.4, 0, 0.2, 1);
+
+    --mapa-filtro: none;
+    --partitura-bg: #fdfaf2;
+    --partitura-filtro: none;
+  }
+
+  /* ============================================================
+     TEMA ESCURO — mesmos horizontes, mas terra-noite
+     ============================================================ */
+  [data-tema="escuro"] {
+    --papel:        #1a1612;
+    --papel-claro:  #25201a;
+    --papel-escuro: #110e0a;
+    --tinta:        #ede5d2;
+    --tinta-media:  #b8af9a;
+    --tinta-leve:   #7d756a;
+    --linha:        #3a3328;
+
+    --musgo:        #8ab056;
+    --musgo-escuro: #6e9040;
+    --musgo-claro:  #2d3a1f;
+    --ocre:         #d4a142;
+    --ferrugem:     #d76b3a;
+    --ferrugem-bg:  #3a2418;
+    --areia:        #b89a5e;
+    --petroleo:     #6a9aab;
+    --petroleo-cl:  #1d3138;
+
+    --sombra-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --sombra:    0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --sombra-lg: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+
+    --mapa-filtro: invert(0.92) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.85);
+    --partitura-bg: var(--papel-escuro);
+    --partitura-filtro: invert(0.95) hue-rotate(180deg);
   }
 
   /* ============================================================
@@ -97,36 +142,84 @@
 
   /* ---------- CABEÇALHO ---------- */
   .cabecalho {
+    position: relative;
     display: flex;
-    align-items: flex-start;
-    gap: var(--s-4);
-    padding-bottom: var(--s-5);
-    margin-bottom: var(--s-5);
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--s-2);
+    padding-bottom: var(--s-3);
+    margin-bottom: var(--s-4);
     border-bottom: 1px solid var(--linha);
   }
-  .cabecalho .logo { flex-shrink: 0; width: 56px; height: 56px; color: var(--musgo); }
-  .cabecalho .titulo-bloco { flex: 1; min-width: 0; }
+  .cabecalho .logo {
+    width: 76px;
+    height: 76px;
+    color: var(--musgo);
+    margin-bottom: var(--s-1);
+  }
   .cabecalho h1 {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: clamp(var(--t-2xl), 4vw, var(--t-3xl));
-    line-height: 1.05;
+    font-size: clamp(var(--t-xl), 3.2vw, var(--t-2xl));
+    line-height: 1;
     letter-spacing: -0.02em;
-    margin: 0 0 var(--s-2) 0;
+    margin: 0;
     color: var(--tinta);
   }
   .cabecalho h1 em { font-style: italic; color: var(--musgo); }
-  .cabecalho .subtitulo {
-    margin: 0; font-size: var(--t-md); color: var(--tinta-media); max-width: 62ch;
+  .cabecalho .tagline {
+    font-family: var(--serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--t-md);
+    color: var(--musgo-escuro);
+    margin: 0;
+    letter-spacing: 0.02em;
   }
-  .cabecalho .meta {
-    flex-shrink: 0;
+  .cabecalho .subtitulo {
+    font-family: var(--serif);
+    font-size: var(--t-sm);
+    font-style: italic;
+    line-height: 1.5;
+    color: var(--tinta-media);
+    margin: var(--s-1) 0 0 0;
+    max-width: 56ch;
+  }
+  .cabecalho .creditos {
     font-family: var(--mono);
-    font-size: var(--t-xs);
+    font-size: 10px;
     color: var(--tinta-leve);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    text-align: right;
+    letter-spacing: 0.14em;
+    margin: var(--s-1) 0 0 0;
+  }
+
+  /* ---------- TOGGLE DE TEMA ---------- */
+  .toggle-tema {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 36px;
+    height: 36px;
+    background: var(--papel-claro);
+    border: 1px solid var(--linha);
+    border-radius: var(--raio);
+    cursor: pointer;
+    color: var(--tinta-media);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transicao);
+  }
+  .toggle-tema:hover {
+    background: var(--papel-escuro);
+    color: var(--tinta);
+    transform: translateY(-1px);
+  }
+  .toggle-tema:focus-visible {
+    outline: 2px solid var(--ocre);
+    outline-offset: 2px;
   }
 
   /* ---------- PROCURAR ---------- */
@@ -502,6 +595,8 @@
     width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--musgo);
+    margin-right: 22px;   /* espaço para os 3 pontos não colidirem com o texto */
+    flex-shrink: 0;
     animation: pulse 1.4s ease-in-out infinite;
     box-shadow:
       10px 0 0 var(--musgo),
@@ -679,13 +774,20 @@
   .part-svg-wrap {
     overflow-x: auto;
     min-height: 180px;
-    background: #fdfaf2;
+    background: var(--partitura-bg);
     border: 1px solid var(--linha);
     border-radius: var(--raio-sm);
     padding: var(--s-3);
     box-shadow: inset 0 1px 3px rgba(43, 37, 28, 0.04);
   }
-  .part-svg-wrap svg { display: block; margin: 0 auto; }
+  .part-svg-wrap svg {
+    display: block;
+    margin: 0 auto;
+    filter: var(--partitura-filtro);
+  }
+
+  /* ---------- LEAFLET TILES EM DARK MODE ---------- */
+  .leaflet-tile-pane { filter: var(--mapa-filtro); }
 
   /* ---------- PLACEHOLDER ---------- */
   .placeholder {
@@ -704,8 +806,8 @@
   }
   @media (max-width: 768px) {
     .pagina { padding: var(--s-4) var(--s-3) var(--s-6); }
-    .cabecalho { flex-direction: column; gap: var(--s-3); }
-    .cabecalho .meta { text-align: left; }
+    .cabecalho .logo { width: 64px; height: 64px; }
+    .toggle-tema { width: 32px; height: 32px; }
     .painel-container.comparar { grid-template-columns: 1fr; }
     .painel.lado,
     .painel-container.comparar .painel.lado { grid-template-columns: 1fr; }
@@ -739,6 +841,8 @@
 <div class="pagina">
 
   <header class="cabecalho">
+    <button class="toggle-tema" id="toggle-tema" aria-label="Alternar tema"></button>
+
     <svg class="logo" viewBox="0 0 56 56" fill="none" aria-hidden="true">
       <circle cx="28" cy="28" r="26" stroke="currentColor" stroke-width="1.2" opacity="0.35"/>
       <path d="M6 34 Q 28 30 50 34" stroke="currentColor" stroke-width="1.4" fill="none"/>
@@ -749,18 +853,14 @@
       <circle cx="28" cy="22" r="1.8" fill="currentColor"/>
     </svg>
 
-    <div class="titulo-bloco">
-      <h1>Curiou<em>Soil</em></h1>
-      <p class="subtitulo">
-        Uma escuta do solo. Clica em qualquer ponto do mapa para ouvir como soa
-        a terra naquele lugar — a sua acidez, textura, matéria orgânica e as
-        pressões humanas próximas, traduzidas em piano em tempo real.
-      </p>
-    </div>
-
-    <div class="meta">
-      Dados<br>SoilGrids · OSM
-    </div>
+    <h1>Curiou<em>Soil</em></h1>
+    <p class="tagline">Solo a solo</p>
+    <p class="subtitulo">
+      Uma escuta do solo. Clica em qualquer ponto do mapa para ouvir como soa
+      a terra naquele lugar — acidez, textura, matéria orgânica e as pressões
+      humanas próximas, traduzidas em piano em tempo real.
+    </p>
+    <p class="creditos">SoilGrids · OpenStreetMap</p>
   </header>
 
   <!-- ============== PROCURAR + PARES ============== -->
