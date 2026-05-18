@@ -184,35 +184,50 @@ CATEGORIAS_OSM = {
     },
 }
 
+OVERPASS_SERVIDORES = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+]
+
 def buscar_overpass(lat, lon, raio_m=10000):
     """
     Procura fontes potenciais de contaminação num raio à volta do ponto.
-    Devolve dict com contagem por categoria, lista de elementos, e score.
-    Se a Overpass falhar (timeout, rate limit), devolve dados vazios sem falhar.
+    Tenta vários servidores Overpass até um responder.
     """
-    # Construir uma query única que pergunta tudo de uma vez
     blocos = []
     for cat, info in CATEGORIAS_OSM.items():
         for q in info["queries"]:
             blocos.append(f'{q}(around:{raio_m},{lat},{lon});')
 
     query = f"""
-    [out:json][timeout:15];
-    (
-      {''.join(blocos)}
-    );
-    out center tags 50;
-    """
+[out:json][timeout:25];
+(
+{chr(10).join(blocos)}
+);
+out center tags 50;
+"""
 
-    try:
-        r = requests.post(OVERPASS_URL, data={"data": query}, timeout=20)
-        r.raise_for_status()
-        dados = r.json()
-    except Exception as e:
-        # Falha graciosa: a música ainda funciona, só sem este factor
+    ultimo_erro = None
+    dados = None
+    for url in OVERPASS_SERVIDORES:
+        print(f"[Overpass] A tentar {url}...")
+        try:
+            r = requests.post(url, data={"data": query}, timeout=30,
+                              headers={"User-Agent": "CuriouSoil/1.0"})
+            r.raise_for_status()
+            dados = r.json()
+            print(f"[Overpass] OK ({len(dados.get('elements', []))} elementos)")
+            break
+        except Exception as e:
+            ultimo_erro = f"{type(e).__name__}: {e}"
+            print(f"[Overpass]   falhou: {ultimo_erro}")
+            continue
+
+    if dados is None:
         return {
             "disponivel": False,
-            "erro": str(e),
+            "erro": ultimo_erro or "Todos os servidores Overpass falharam",
             "contagens": {},
             "elementos": [],
             "pressao_score": 0,
@@ -223,7 +238,6 @@ def buscar_overpass(lat, lon, raio_m=10000):
 
     for el in dados.get("elements", []):
         tags = el.get("tags", {})
-        # Identificar a que categoria pertence
         cat_encontrada = None
         if tags.get("landuse") == "quarry" or tags.get("man_made") == "mineshaft" or tags.get("industrial") == "mine":
             cat_encontrada = "mina"
@@ -243,7 +257,6 @@ def buscar_overpass(lat, lon, raio_m=10000):
 
         contagens[cat_encontrada] += 1
 
-        # Coordenadas (centro se for way)
         if "lat" in el and "lon" in el:
             el_lat, el_lon = el["lat"], el["lon"]
         elif "center" in el:
@@ -259,14 +272,12 @@ def buscar_overpass(lat, lon, raio_m=10000):
             "lon": el_lon,
         })
 
-    # Calcular score (logarítmico — 1 mina pesa muito, 50 indústrias não dominam)
     pressao = 0
     for cat, n in contagens.items():
         if n > 0:
             peso = CATEGORIAS_OSM[cat]["peso"]
-            pressao += peso * (1 + np.log1p(n - 1))  # 1→peso, 2→peso*1.69, 10→peso*3.4
+            pressao += peso * (1 + np.log1p(n - 1))
 
-    # Limitar elementos devolvidos para não inundar o frontend
     elementos = sorted(elementos, key=lambda e: e["categoria"])[:30]
 
     return {
