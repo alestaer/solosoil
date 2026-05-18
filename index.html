@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<title>CuriouSoil — sonificação de solos</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
+
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #f5f3ee; color: #2a2a2a; }
+  h1 { margin-top: 0; }
+  h3 { margin: 0 0 10px 0; font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em; color: #5a7a3a; }
+  #mapa { height: 450px; border-radius: 8px; margin-bottom: 16px; }
+
+  .painel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.caixa.larga { grid-column: 1 / -1; }
+
+  .param { display: grid; grid-template-columns: 130px 1fr 60px; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 6px; }
+  .param .nome { color: #555; }
+  .param .barra { background: #eee; height: 8px; border-radius: 4px; overflow: hidden; }
+  .param .barra > div { height: 100%; background: #5a7a3a; transition: width 0.3s; }
+  .param .valor { font-family: ui-monospace, monospace; text-align: right; font-size: 12px; }
+
+  .avisos { background: #fff3cd; border-left: 4px solid #d4a017; padding: 10px 14px; border-radius: 4px; margin-top: 12px; font-size: 13px; }
+  .avisos.ok { background: #e6f4d8; border-color: #5a7a3a; }
+  .avisos b { display: block; margin-bottom: 4px; }
+
+  .coord { font-family: ui-monospace, monospace; font-size: 12px; color: #777; }
+
+  .musica-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 13px; }
+  .musica-grid .k { color: #777; }
+  .musica-grid .v { font-family: ui-monospace, monospace; }
+
+  #partitura { overflow-x: auto; min-height: 180px; }
+  button { padding: 8px 16px; font-size: 14px; cursor: pointer; border: none; background: #5a7a3a; color: white; border-radius: 4px; }
+  button:hover:not(:disabled) { background: #46612b; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .estado { color: #666; font-size: 13px; margin: 8px 0; min-height: 18px; }
+
+  .placeholder { color: #999; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>SoloSoil</h1>
+<p>Clica em qualquer ponto do mapa (sobre terra firme) para ouvires o solo daquela região.</p>
+
+<div id="mapa"></div>
+
+<div class="painel">
+
+  <div class="caixa">
+    <h3>Localização</h3>
+    <p class="coord" id="coord">—</p>
+    <p class="estado" id="estado"></p>
+    <button id="btn-tocar" disabled>▶ Tocar de novo</button>
+    <div id="avisos-bloco"></div>
+  </div>
+
+  <div class="caixa">
+    <h3>Parâmetros do solo</h3>
+    <div id="solo-params"><p class="placeholder">Ainda sem clique.</p></div>
+  </div>
+
+  <div class="caixa">
+  <h3>Pressão humana próxima</h3>
+  <div id="pressao-humana"><p class="placeholder">Ainda sem clique.</p></div>
+</div>
+
+  <div class="caixa">
+    <h3>Parâmetros musicais</h3>
+    <div id="musica-params"><p class="placeholder">Ainda sem clique.</p></div>
+  </div>
+
+  <div class="caixa larga">
+    <h3>Partitura</h3>
+    <div id="partitura"></div>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+
+</body>
+</html>
