@@ -144,30 +144,57 @@
   .cabecalho {
     position: relative;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    text-align: center;
-    gap: var(--s-2);
+    gap: var(--s-6);
     padding-bottom: var(--s-3);
     margin-bottom: var(--s-4);
     border-bottom: 1px solid var(--linha);
   }
-  .cabecalho .logo {
-    width: 76px;
-    height: 76px;
-    color: var(--musgo);
-    margin-bottom: var(--s-1);
+  .cab-esq {
+    flex-shrink: 0;
+  }
+  .cab-dir {
+    flex: 1;
+    min-width: 0;
+    padding-left: var(--s-6);
+    border-left: 1px solid var(--linha);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
   }
   .cabecalho h1 {
     font-family: var(--serif);
     font-weight: 500;
-    font-size: clamp(var(--t-xl), 3.2vw, var(--t-2xl));
+    font-size: clamp(var(--t-2xl), 5.5vw, 4.5rem);
     line-height: 1;
-    letter-spacing: -0.02em;
-    margin: 0;
+    letter-spacing: -0.04em;
+    margin: 0 0 var(--s-2);
     color: var(--tinta);
+    display: flex;
+    align-items: center;
   }
-  .cabecalho h1 em { font-style: italic; color: var(--musgo); }
+  .cabecalho h1 em {
+    font-style: italic;
+    color: var(--musgo);
+    display: inline-flex;
+    align-items: center;
+  }
+  /* Logo SVG inline como letra 'o' */
+  .o-logo {
+    display: inline-block;
+    width: 0.78em;
+    height: 0.78em;
+    vertical-align: -0.06em;
+    color: var(--musgo);
+    line-height: 1;
+    margin: 0 0.01em;
+  }
+  .o-logo svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
   .cabecalho .tagline {
     font-family: var(--serif);
     font-style: italic;
@@ -183,8 +210,7 @@
     font-style: italic;
     line-height: 1.5;
     color: var(--tinta-media);
-    margin: var(--s-1) 0 0 0;
-    max-width: 56ch;
+    margin: 0;
   }
   .cabecalho .creditos {
     font-family: var(--mono);
@@ -192,7 +218,7 @@
     color: var(--tinta-leve);
     text-transform: uppercase;
     letter-spacing: 0.14em;
-    margin: var(--s-1) 0 0 0;
+    margin: 0;
   }
 
   /* ---------- TOGGLE DE TEMA ---------- */
@@ -806,7 +832,18 @@
   }
   @media (max-width: 768px) {
     .pagina { padding: var(--s-4) var(--s-3) var(--s-6); }
-    .cabecalho .logo { width: 64px; height: 64px; }
+    .cabecalho {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--s-3);
+    }
+    .cab-dir {
+      padding-left: 0;
+      border-left: 0;
+      border-top: 1px solid var(--linha);
+      padding-top: var(--s-3);
+      width: 100%;
+    }
     .toggle-tema { width: 32px; height: 32px; }
     .painel-container.comparar { grid-template-columns: 1fr; }
     .painel.lado,
@@ -843,24 +880,27 @@
   <header class="cabecalho">
     <button class="toggle-tema" id="toggle-tema" aria-label="Alternar tema"></button>
 
-    <svg class="logo" viewBox="0 0 56 56" fill="none" aria-hidden="true">
-      <circle cx="28" cy="28" r="26" stroke="currentColor" stroke-width="1.2" opacity="0.35"/>
-      <path d="M6 34 Q 28 30 50 34" stroke="currentColor" stroke-width="1.4" fill="none"/>
-      <path d="M6 40 Q 28 36 50 40" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.7"/>
-      <path d="M6 46 Q 28 42 50 46" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.45"/>
-      <path d="M14 22 Q 18 14 22 22 T 30 22 T 38 22 T 46 22"
-            stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-      <circle cx="28" cy="22" r="1.8" fill="currentColor"/>
-    </svg>
+    <div class="cab-esq">
+      <h1>Solo<em>S<span class="o-logo" aria-label="o"><svg viewBox="0 0 56 56" fill="none" aria-hidden="true">
+          <circle cx="28" cy="28" r="26" stroke="currentColor" stroke-width="1.2" opacity="0.35"/>
+          <path d="M6 34 Q 28 30 50 34" stroke="currentColor" stroke-width="1.4" fill="none"/>
+          <path d="M6 40 Q 28 36 50 40" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.7"/>
+          <path d="M6 46 Q 28 42 50 46" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.45"/>
+          <path d="M14 22 Q 18 14 22 22 T 30 22 T 38 22 T 46 22"
+                stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+          <circle cx="28" cy="22" r="1.8" fill="currentColor"/>
+        </svg></span>il</em></h1>
+      <p class="tagline">Solo a solo</p>
+    </div>
 
-    <h1>Solo<em>Soil</em></h1>
-    <p class="tagline">Solo a solo</p>
-    <p class="subtitulo">
-      Uma escuta do solo. Clica em qualquer ponto do mapa para ouvir como soa
-      a terra naquele lugar — acidez, textura, matéria orgânica e as pressões
-      humanas próximas, traduzidas em piano em tempo real.
-    </p>
-    <p class="creditos">SoilGrids · OpenStreetMap</p>
+    <div class="cab-dir">
+      <p class="subtitulo">
+        Uma escuta do solo. Clica em qualquer ponto do mapa para ouvir como soa
+        a terra naquele lugar — acidez, textura, matéria orgânica e as pressões
+        humanas próximas, traduzidas em piano em tempo real.
+      </p>
+      <p class="creditos">SoilGrids · OpenStreetMap</p>
+    </div>
   </header>
 
   <!-- ============== PROCURAR + PARES ============== -->
