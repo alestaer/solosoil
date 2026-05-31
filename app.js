@@ -1353,6 +1353,11 @@ function fecharSlot(slot) {
 //  SELECIONAR PONTO — chamado por clique no mapa, pesquisa ou par
 // ---------------------------------------------------------------------
 async function selecionarPonto(lat, lon, opts = {}) {
+  // Normalizar coordenadas: ao arrastar o mapa para lá do antimeridiano, o
+  // Leaflet devolve longitudes como -341. Reduz-se ao intervalo [-180, 180].
+  lon = ((Number(lon) + 180) % 360 + 360) % 360 - 180;
+  lat = Math.max(-90, Math.min(90, Number(lat)));
+
   // decidir o slot
   let slot = opts.slot;
   if (!slot) {

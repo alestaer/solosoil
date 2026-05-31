@@ -32,6 +32,36 @@ from xml.sax.saxutils import escape as xml_escape
 app = Flask(__name__)
 CORS(app)
 
+# Garante cabeçalho CORS em TODAS as respostas, incluindo erros — assim um
+# eventual erro nunca aparece no browser disfarçado de "erro de CORS".
+@app.after_request
+def _garantir_cors(resp):
+    resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+    return resp
+
+
+# Qualquer exceção não tratada devolve JSON (com CORS), nunca um 500 nu.
+@app.errorhandler(Exception)
+def _erro_global(e):
+    import traceback
+    traceback.print_exc()
+    resp = jsonify({"erro": "Erro interno ao gerar a peça.", "detalhe": str(e)})
+    resp.status_code = getattr(e, "code", 500) or 500
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
+def _normalizar_coords(lat, lon):
+    """Mantém as coordenadas dentro dos limites válidos. O Leaflet, ao arrastar
+    o mapa para lá do antimeridiano, devolve longitudes como -341; normaliza-se
+    para o intervalo [-180, 180] (e a latitude para [-90, 90])."""
+    try:
+        lat = max(-90.0, min(90.0, float(lat)))
+        lon = ((float(lon) + 180.0) % 360.0) - 180.0
+    except (TypeError, ValueError):
+        pass
+    return lat, lon
+
 # Diretório onde está este ficheiro (serve o frontend, se estiver ao lado).
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1651,6 +1681,7 @@ def debug():
         lon = float(request.args.get("lon"))
     except (TypeError, ValueError):
         return jsonify({"erro": "Coordenadas inválidas"}), 400
+    lat, lon = _normalizar_coords(lat, lon)
     try:
         dados, valores = buscar_solo(lat, lon)
         return jsonify({"valores_extraidos": valores, "resposta_crua": dados})
@@ -1726,6 +1757,7 @@ def gerar():
         lon = float(request.args.get("lon"))
     except (TypeError, ValueError):
         return jsonify({"erro": "Coordenadas inválidas"}), 400
+    lat, lon = _normalizar_coords(lat, lon)
 
     opcoes = _ler_opcoes()
     # Semente determinística: a mesma localização + as mesmas definições geram
