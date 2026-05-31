@@ -8,7 +8,7 @@ Separamos *o que o solo é* (qualidades intrínsecas → conteúdo e carácter d
 música) de *o que os humanos lhe fizeram* (pressão/degradação → distorções
 sobrepostas: dissonância, cromatismo, rupturas). Um solo saudável soa íntegro
 e consonante; um solo degradado soa perturbado. Isto é claro pedagogicamente
-e eficaz como artivismo.
+e expressiva.
 
 A "dificuldade" funciona como ENVELOPE (define os intervalos de tempo,
 compasso, âmbito, densidade rítmica permitidos) e o SOLO define a POSIÇÃO
@@ -352,11 +352,11 @@ DIFICULDADE = {
 #   tempo_mult          : multiplica o andamento (dentro do envelope)
 #   densidade_mult      : empurra para mais/menos notas por compasso
 #   reverb_bonus        : soma à reverberação sugerida
-#   tintinnabuli        : geração à Arvo Pärt (voz-M diatónica + voz-T da tríade)
+#   tintinnabuli        : geração minimal (voz-M diatónica + voz-T da tríade)
 # ============================================================
 ESTILOS = {
     "livre": {
-        "nome": "Livre (artivismo)", "crom_cap": 1.0, "diss_cap": 1.0,
+        "nome": "Livre", "crom_cap": 1.0, "diss_cap": 1.0,
         "salto_mult": 1.0, "legato_bonus": 0.0, "staccato_mult": 1.0,
         "consonante": False, "harmonia_tipo": "triade", "baixo_padrao": "caminhante",
         "prog_voc": "livre", "tempo_mult": 1.0, "densidade_mult": 1.0,
@@ -384,7 +384,7 @@ ESTILOS = {
         "reverb_bonus": 0.28, "tintinnabuli": False,
     },
     "minimal": {
-        "nome": "Minimal (Arvo Pärt)", "crom_cap": 0.0, "diss_cap": 0.0,
+        "nome": "Minimal", "crom_cap": 0.0, "diss_cap": 0.0,
         "salto_mult": 0.0, "legato_bonus": 0.35, "staccato_mult": 0.0,
         "consonante": True, "harmonia_tipo": "tintinnabuli", "baixo_padrao": "tintinnabuli",
         "prog_voc": "minimal", "tempo_mult": 0.78, "densidade_mult": 0.55,
@@ -860,7 +860,7 @@ def progressao(tonal, n_compassos, prog_voc="livre", frase=4):
         ciclos = ([0, 3, 4, 3], [0, 1, 5, 3], [0, 5, 3, 0])
     elif prog_voc == "minimal":
         ciclos = ([0, 0, 5, 0], [0, 3, 0, 0])
-    else:  # livre (artivismo)
+    else:  # livre
         ciclos = ([0, 4, 5, 3],) if maior else ([0, 5, 2, 4],)
 
     funcional = prog_voc in ("funcional", "romantica")
@@ -899,7 +899,43 @@ def _snap_acorde(grau, grau_raiz):
     return melhor
 
 
-def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog=None):
+def envelope_intensidade(n_compassos):
+    """Arco de intensidade (0..1) por compasso, com o clímax na SECÇÃO ÁUREA
+    (~0,618 da obra, como em Bach/Bartók). Sobe suavemente até ao clímax e
+    recua até ao fim. Governa dinâmica, registo, densidade e articulação,
+    para que a peça tenha uma direção e um ponto culminante coerentes."""
+    n = max(1, int(n_compassos))
+    if n <= 2:
+        return [0.85] * n
+    clim = max(1, min(n - 2, int(round(0.618 * (n - 1)))))
+    ini, pico, fim = 0.32, 1.0, 0.42
+
+    def suave(x):                       # smoothstep (ease in-out)
+        x = max(0.0, min(1.0, x))
+        return x * x * (3.0 - 2.0 * x)
+
+    env = []
+    for m in range(n):
+        if m <= clim:
+            t = suave(m / clim) if clim > 0 else 1.0
+            env.append(ini + (pico - ini) * t)
+        else:
+            t = suave((m - clim) / max(1, n - 1 - clim))
+            env.append(pico + (fim - pico) * t)
+    return env
+
+
+def _dinamica_de(intens):
+    """Quantiza a intensidade contínua num nível de dinâmica de partitura."""
+    if intens < 0.30: return "pp"
+    if intens < 0.45: return "p"
+    if intens < 0.60: return "mp"
+    if intens < 0.76: return "mf"
+    if intens < 0.90: return "f"
+    return "ff"
+
+
+def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog=None, env=None):
     escala = tonal.escala_int
     tam = len(escala)
     beats = META_BATIDAS[metro]
@@ -911,6 +947,11 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
     grau = 0                          # arranca na tónica
     for c in range(n_compassos):
         eventos = []
+        intens = env[c] if env else 0.7
+        # densidade: menos pausas perto do clímax, mais nas zonas calmas
+        prob_sil_m = float(np.clip(p["prob_silencio"] * (1.35 - 0.95 * intens), 0.0, 0.9))
+        # registo: a melodia sobe uma oitava no auge da obra
+        oct_off = 1 if intens >= 0.9 else 0
         celula = escolher_celula(metro, dif_atual(p), p["vivacidade"], p["legato"])
         ultima_da_frase = ((c + 1) % p["frase_compassos"] == 0)
         n_ev = len(celula)
@@ -918,7 +959,7 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
             # Limita duração ao envelope (nunca mais curto que min_dur)
             if dur_q < p["min_dur"]:
                 dur_q = p["min_dur"]
-            is_rest = (np.random.random() < p["prob_silencio"]
+            is_rest = (np.random.random() < prob_sil_m
                        and not (ultima_da_frase and i == n_ev - 1))
             if is_rest:
                 eventos.append(_evento_pausa(dur_q, tonal, tempo_q, seg_por_q))
@@ -944,7 +985,7 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
                 grau = int(np.clip(_snap_acorde(grau, prog[c]), -amb // 2, amb // 2))
 
             # grau -> MIDI (registo já vem de oitava_base; sem transpor cromático)
-            midi = tonal.grau_para_midi(grau, oitava_base)
+            midi = tonal.grau_para_midi(grau, oitava_base + oct_off)
 
             # Cromatismo (nota fora da escala) — nunca em tempos fortes consonantes
             alteracao_extra = 0
@@ -956,17 +997,21 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
 
             midi = int(np.clip(midi, lim_min, lim_max))
 
-            # Dinâmica: arco (mais forte a meio)
-            frac = c / max(1, n_compassos - 1)
-            arco = 1.0 - abs(frac - 0.5) * 0.5
-            vel = float(np.clip(p["vel_base"] * arco + np.random.uniform(-0.05, 0.05),
-                                0.35, 0.95))
-            staccato = (np.random.random() < p["prob_staccato"]
-                        and dur_q <= 1.0)
+            # Dinâmica governada pelo envelope (clímax na secção áurea):
+            # pp/p nas margens, f/ff no auge.
+            vel = float(np.clip(p["vel_base"] * (0.55 + 0.55 * intens)
+                                + np.random.uniform(-0.04, 0.04), 0.3, 1.0))
+            # Articulação coerente: mais legato no auge, mais staccato nas
+            # zonas leves; acento no tempo forte dos compassos mais intensos.
+            prob_stac_m = float(np.clip(p["prob_staccato"] * (1.4 - intens), 0.0, 0.9))
+            staccato = (np.random.random() < prob_stac_m and dur_q <= 1.0)
+            acento = (i == 0 and intens >= 0.72 and not staccato)
+            if acento:
+                vel = float(np.clip(vel * 1.12, 0.3, 1.0))
 
             sol = tonal.soletrar(midi, alteracao_extra)
             ev = _evento_nota(midi, dur_q, vel, staccato, sol, tempo_q, seg_por_q,
-                              p["legato"])
+                              p["legato"], acento)
 
             # Acorde (engrossa a textura)
             if (p["prob_acorde"] > 0 and not staccato
@@ -975,7 +1020,7 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
                 ev["acorde"] = []
                 for add in (2, 4):                            # 3ª e 5ª da escala
                     g2 = grau + add
-                    m2 = int(np.clip(tonal.grau_para_midi(g2, oitava_base),
+                    m2 = int(np.clip(tonal.grau_para_midi(g2, oitava_base + oct_off),
                                      lim_min, lim_max))
                     s2 = tonal.soletrar(m2)
                     ev["acorde"].append({"midi": m2, "vexkey": s2["vexkey"],
@@ -993,7 +1038,7 @@ def dif_atual(p):
     return p.get("_dif", "intermedio")
 
 
-def _evento_nota(midi, dur_q, vel, staccato, sol, tempo_q, seg_por_q, legato):
+def _evento_nota(midi, dur_q, vel, staccato, sol, tempo_q, seg_por_q, legato, acento=False):
     dur_soa = dur_q * (0.55 if staccato else (0.85 + 0.13 * legato))
     return {
         "is_rest": False,
@@ -1004,6 +1049,7 @@ def _evento_nota(midi, dur_q, vel, staccato, sol, tempo_q, seg_por_q, legato):
         "vex_dur": dur_para_vex(dur_q, False),
         "dur_q": dur_q,
         "staccato": staccato,
+        "acento": acento,
         "velocity": round(vel, 2),
         "inicio_seg": round(tempo_q * seg_por_q, 4),
         "duracao_seg": round(dur_soa * seg_por_q, 4),
@@ -1026,13 +1072,15 @@ def _evento_pausa(dur_q, tonal, tempo_q, seg_por_q):
 # ============================================================
 # HARMONIA (acordes por compasso)
 # ============================================================
-def gerar_harmonia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog):
+def gerar_harmonia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog, env=None):
     seg_por_q = 60.0 / p["bpm"]
     beats = META_BATIDAS[metro]
     compassos = []
     tempo_q = 0.0
     for c in range(n_compassos):
         eventos = []
+        intens = env[c] if env else 0.7
+        vel_c = round(float(np.clip(p["vel_base"] * (0.45 + 0.45 * intens), 0.28, 0.8)), 2)
         grau_raiz = prog[c]
         tipo = p.get("harmonia_tipo", "triade")
         if tipo == "setima":
@@ -1070,8 +1118,8 @@ def gerar_harmonia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, 
                 "vexkey": s["vexkey"], "vex_acc": s["vex_acc"],
                 "step": s["letra"], "alter": s["alteracao"], "octave": s["oitava"],
                 "vex_dur": dur_para_vex(b, False), "dur_q": b,
-                "staccato": False,
-                "velocity": round(float(np.clip(p["vel_base"] * 0.7, 0.3, 0.7)), 2),
+                "staccato": False, "acento": False,
+                "velocity": vel_c,
                 "inicio_seg": round(tempo_q * seg_por_q, 4),
                 "duracao_seg": round(b * 0.95 * seg_por_q, 4),
                 "acorde": [],
@@ -1109,7 +1157,7 @@ _RITMO_BAIXO = {
 }
 
 
-def gerar_baixo(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog):
+def gerar_baixo(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog, env=None):
     seg_por_q = 60.0 / p["bpm"]
     beats = META_BATIDAS[metro]
     padrao_nome = p.get("baixo_padrao", "caminhante")
@@ -1117,6 +1165,8 @@ def gerar_baixo(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, pro
     tempo_q = 0.0
     for c in range(n_compassos):
         eventos = []
+        intens = env[c] if env else 0.7
+        vel_c = round(float(np.clip(p["vel_base"] * (0.4 + 0.4 * intens), 0.28, 0.72)), 2)
         grau_raiz = prog[c]
         ultima = ((c + 1) % p["frase_compassos"] == 0)
 
@@ -1153,8 +1203,8 @@ def gerar_baixo(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, pro
                 "vexkey": s["vexkey"], "vex_acc": s["vex_acc"],
                 "step": s["letra"], "alter": s["alteracao"], "octave": s["oitava"],
                 "vex_dur": dur_para_vex(dur_q, False), "dur_q": dur_q,
-                "staccato": False,
-                "velocity": round(float(np.clip(p["vel_base"] * 0.6, 0.3, 0.65)), 2),
+                "staccato": False, "acento": False,
+                "velocity": vel_c,
                 "inicio_seg": round(tempo_q * seg_por_q, 4),
                 "duracao_seg": round(dur_q * (0.96 if p["legato"] > 0.6 else 0.9) * seg_por_q, 4),
             })
@@ -1164,7 +1214,7 @@ def gerar_baixo(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, pro
 
 
 # ============================================================
-# VOZES À ARVO PÄRT (tintinnabuli)
+# VOZES MINIMAIS (tintinnabuli)
 #   voz-M = a melodia (lenta, por graus conjuntos, consonante)
 #   voz-T = para cada nota da melodia, a nota da TRÍADE DA TÓNICA mais
 #           próxima, transposta para o registo da parte (espelha o ritmo).
@@ -1295,8 +1345,13 @@ def _mxml_nota(ev, voz, staff=None):
     out.append(f"        <type>{tipo}</type>")
     if staff is not None:
         out.append(f"        <staff>{staff}</staff>")
+    artic = ""
     if ev.get("staccato"):
-        out.append("        <notations><articulations><staccato/>"
+        artic += "<staccato/>"
+    if ev.get("acento"):
+        artic += "<accent/>"
+    if artic:
+        out.append(f"        <notations><articulations>{artic}"
                    "</articulations></notations>")
     out.append("      </note>")
     # notas do acorde (mesmo ataque)
@@ -1333,7 +1388,7 @@ def _agrupar_partes(partes):
     return grupos
 
 
-def construir_musicxml(partes, tonal, metro, titulo="CuriouSoil"):
+def construir_musicxml(partes, tonal, metro, titulo="CuriouSoil", env=None):
     num, den = META_VEX[metro]
     beats_div = int(round(META_BATIDAS[metro] * DIVISIONS))   # duração do compasso
     fifths = tonal.fifths
@@ -1371,6 +1426,7 @@ def construir_musicxml(partes, tonal, metro, titulo="CuriouSoil"):
         pid = f"P{idx+1}"
         grand = len(grupo) > 1
         n_compassos = len(grupo[0]["compassos"])
+        ultima_dyn = None
         L.append(f'  <part id="{pid}">')
         for m_idx in range(n_compassos):
             L.append(f'    <measure number="{m_idx+1}">')
@@ -1391,6 +1447,17 @@ def construir_musicxml(partes, tonal, metro, titulo="CuriouSoil"):
                     sign, line = clef_map[grupo[0]["clef"]]
                     L.append(f'        <clef><sign>{sign}</sign><line>{line}</line></clef>')
                 L.append('      </attributes>')
+            # Marcas de dinâmica (só na parte de cima), seguindo o arco/clímax.
+            if env is not None and idx == 0 and m_idx < len(env):
+                dyn = _dinamica_de(env[m_idx])
+                if dyn != ultima_dyn:
+                    L.append('      <direction placement="below">')
+                    L.append(f'        <direction-type><dynamics><{dyn}/></dynamics>'
+                             f'</direction-type>')
+                    if grand:
+                        L.append('        <staff>1</staff>')
+                    L.append('      </direction>')
+                    ultima_dyn = dyn
             if grand:
                 for st_i, pt in enumerate(grupo, start=1):
                     if st_i > 1:
@@ -1510,6 +1577,7 @@ def montar_peca(valores, agua, diag, osm, opcoes):
     n_compassos = int(np.clip(n_compassos, p["frase_compassos"], 400))
 
     prog = progressao(tonal, n_compassos, p["prog_voc"], p["frase_compassos"])
+    env = envelope_intensidade(n_compassos)          # arco com clímax na secção áurea
     papeis = atribuir_papeis(instrumentos, estilo)
 
     # 1ª passagem: melodia (voz-M) primeiro, para o tintinnabuli a poder espelhar
@@ -1518,7 +1586,7 @@ def montar_peca(valores, agua, diag, osm, opcoes):
         if entry["papel"] == "melodia":
             ob, lmin, lmax = registo_para_papel("melodia", entry["instrumento"],
                                                 p["transpor"], tonal.tonic_pc)
-            melodia_comps = gerar_melodia(tonal, p, metro, n_compassos, ob, lmin, lmax, prog)
+            melodia_comps = gerar_melodia(tonal, p, metro, n_compassos, ob, lmin, lmax, prog, env)
             entry["_comps"] = melodia_comps
 
     # 2ª passagem: restantes vozes
@@ -1535,9 +1603,9 @@ def montar_peca(valores, agua, diag, osm, opcoes):
             else:  # harmonia (ou 2ª voz) -> tintinnabuli a espelhar a melodia
                 comps = gerar_voz_tintinnabuli(melodia_comps or [], tonal, p, ob, lmin, lmax)
         elif papel == "harmonia":
-            comps = gerar_harmonia(tonal, p, metro, n_compassos, ob, lmin, lmax, prog)
+            comps = gerar_harmonia(tonal, p, metro, n_compassos, ob, lmin, lmax, prog, env)
         else:  # baixo
-            comps = gerar_baixo(tonal, p, metro, n_compassos, ob, lmin, lmax, prog)
+            comps = gerar_baixo(tonal, p, metro, n_compassos, ob, lmin, lmax, prog, env)
 
         partes.append({
             "papel": papel,
@@ -1738,7 +1806,7 @@ def _ler_opcoes():
         dur = float(request.args.get("duracao", 60))
     except (TypeError, ValueError):
         dur = 60.0
-    dur = float(np.clip(dur, 10, 273))         # 4'33" = 273 s
+    dur = float(np.clip(dur, 10, 273))
     modo = (request.args.get("modo") or "acustico").lower()
     estilo = (request.args.get("estilo") or "livre").lower()
     if estilo not in ESTILOS:
@@ -1797,7 +1865,8 @@ def gerar():
         valores, agua, diag, osm, opcoes)
 
     num, den = META_VEX[metro]
-    musicxml = construir_musicxml(partes, tonal, metro)
+    env = envelope_intensidade(n_compassos)
+    musicxml = construir_musicxml(partes, tonal, metro, env=env)
     midi_bytes = construir_midi(partes, p["bpm"], tonal, metro)
     midi_b64 = base64.b64encode(midi_bytes).decode("ascii")
     melodia_legado, baixo_legado = flatten_para_legado(partes)

@@ -116,7 +116,7 @@ async function montarControlos() {
   const dur = document.getElementById("duracao");
   const lbl = document.getElementById("duracao-label");
   if (dur && lbl) {
-    const ref = () => lbl.textContent = fmtTempo(dur.value) + (dur.value >= 273 ? "  (4′33″)" : "");
+    const ref = () => lbl.textContent = fmtTempo(dur.value);
     dur.addEventListener("input", () => { ref(); agendarRegeneracao(); });
     ref();
   }
@@ -153,16 +153,19 @@ function montarInstrumentos(cont, familias) {
   });
 
   cont.appendChild(barra); cont.appendChild(grupos); cont.appendChild(resumo);
-  const famPiano = familias.find((f) => (f.instrumentos || []).some((i) => i.id === "piano"));
-  abrirFamilia(famPiano ? famPiano.id : familias[0].id);
+  // Nenhuma família aberta por defeito: os instrumentos só aparecem quando o
+  // utilizador clica no grupo. O piano fica selecionado (escondido) à mesma.
   atualizarResumoInstrumentos();
 }
 
 function abrirFamilia(famId) {
+  // toggle: clicar na família aberta fecha-a; clicar noutra abre essa.
+  const chip = document.querySelector(`#lista-instrumentos .familia-chip[data-fam="${famId}"]`);
+  const jaAberta = chip && chip.classList.contains("ativa");
   document.querySelectorAll("#lista-instrumentos .familia-chip").forEach((c) =>
-    c.classList.toggle("ativa", c.dataset.fam === famId));
+    c.classList.toggle("ativa", !jaAberta && c.dataset.fam === famId));
   document.querySelectorAll("#lista-instrumentos .familia-grupo").forEach((g) =>
-    g.hidden = (g.dataset.fam !== famId));
+    g.hidden = jaAberta || (g.dataset.fam !== famId));
 }
 
 function atualizarResumoInstrumentos() {
@@ -1141,16 +1144,25 @@ async function exportarWAV(slot) {
   if (!d || (!d.melodia && !d.baixo)) return;
   const btn = document.getElementById(`btn-wav-${slot.toLowerCase()}`);
   if (btn) btn.disabled = true;
-  setEstadoMsg(slot, 'A gerar áudio (WAV)…', true);
   const electronico = d.musica?.modo_geracao === 'electronico';
   const mel = d.melodia || [], bx = d.baixo || [];
   const fim = [...mel, ...bx].reduce((a, n) => Math.max(a, n.inicio + n.duracao), 0);
-  const dur = fim + (electronico ? 3 : 1.5) + 0.2;
+  const dur = fim + (electronico ? 2.2 : 1.2) + 0.2;
+  setEstadoMsg(slot, `A gerar áudio (WAV, ~${Math.ceil(fim)}s)…`, true);
+  // dá um instante ao browser para pintar o aviso antes do render pesado
+  await new Promise(r => setTimeout(r, 30));
   try {
     await garantirToneIniciado();
-    const ab = await Tone.Offline(() => {
+    // Render offline a 22 kHz: cerca de metade do tempo de um render a 44 kHz,
+    // com qualidade mais que suficiente para uma audição rápida.
+    const SR = 22050;
+    const render = (cb) => {
+      try { return Tone.Offline(cb, dur, 2, SR); }   // assinatura com sample-rate
+      catch (_) { return Tone.Offline(cb, dur); }     // recuo: rate por defeito
+    };
+    const ab = await render(() => {
       const master = new Tone.Gain(0.9).toDestination();
-      const reverb = new Tone.Freeverb({ roomSize: electronico ? 0.85 : 0.6, dampening: 3000, wet: d.musica?.reverb_mix ?? 0.2 }).connect(master);
+      const reverb = new Tone.Freeverb({ roomSize: electronico ? 0.82 : 0.55, dampening: 3000, wet: d.musica?.reverb_mix ?? 0.2 }).connect(master);
       let entrada = reverb;
       if (electronico) entrada = new Tone.FeedbackDelay({ delayTime: 0.38, feedback: 0.3, wet: 0.25 }).connect(reverb);
       const sMel = criarVozRender('melodia', electronico); sMel.connect(entrada);
