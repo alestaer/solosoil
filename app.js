@@ -1,22 +1,268 @@
+// =====================================================================
+//  CuriouSoil — frontend
+//  Stack: Leaflet · Tone.js · VexFlow · vanilla JS
+//  Features: comparação A/B + pesquisa de localização + pares curados
+// =====================================================================
+
 const API_URL = "https://solosoil.onrender.com";
 
- 
-// ===== MAPA =====
+// ---------------------------------------------------------------------
+//  DEFINIÇÕES GLOBAIS — instrumentos, dificuldade, duração, modo
+//  (afectam a partitura e as exportações; a pré-escuta A/B é a piano)
+// ---------------------------------------------------------------------
+const INSTRUMENTOS_FALLBACK = [
+  { id: "piano", nome: "Piano" }, { id: "violino", nome: "Violino" },
+  { id: "violoncelo", nome: "Violoncelo" }, { id: "flauta", nome: "Flauta" },
+  { id: "clarinete", nome: "Clarinete" }, { id: "oboe", nome: "Oboé" },
+  { id: "trompete", nome: "Trompete" }, { id: "marimba", nome: "Marimba" },
+  { id: "guitarra", nome: "Guitarra" }, { id: "contrabaixo", nome: "Contrabaixo" },
+];
+let NOMES_INSTR = Object.fromEntries(INSTRUMENTOS_FALLBACK.map((i) => [i.id, i.nome]));
+
+const fmtTempo = (s) => { s = Math.round(+s); return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`; };
+
+let avisoCfgTimer = null;
+function flashAvisoCfg(txt) {
+  const el = document.getElementById("aviso-config");
+  if (!el) return;
+  el.textContent = txt; el.classList.add("visivel");
+  clearTimeout(avisoCfgTimer);
+  avisoCfgTimer = setTimeout(() => el.classList.remove("visivel"), 2600);
+}
+
+function toggleChipInstrumento(b) {
+  if (document.getElementById("modo-eletronico")?.checked) return;
+  const ativos = [...document.querySelectorAll("#lista-instrumentos .chip.ativo")];
+  if (!b.classList.contains("ativo") && ativos.length >= 3) {
+    flashAvisoCfg("Máximo de 3 instrumentos em simultâneo."); return;
+  }
+  b.classList.toggle("ativo");
+  if (!document.querySelector("#lista-instrumentos .chip.ativo")) b.classList.add("ativo");
+  document.querySelectorAll("#lista-instrumentos .chip").forEach((c) =>
+    c.setAttribute("aria-pressed", c.classList.contains("ativo") ? "true" : "false"));
+}
+
+async function montarControlos() {
+  const cont = document.getElementById("lista-instrumentos");
+  if (!cont) return;
+  let lista = INSTRUMENTOS_FALLBACK;
+  try {
+    const r = await fetch(`${API_URL}/instrumentos`);
+    const d = await r.json();
+    if (d && Array.isArray(d.instrumentos) && d.instrumentos.length) lista = d.instrumentos;
+  } catch (_) { /* usa fallback */ }
+  NOMES_INSTR = Object.fromEntries(lista.map((i) => [i.id, i.nome]));
+  cont.innerHTML = "";
+  lista.forEach(({ id, nome }) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip" + (id === "piano" ? " ativo" : "");
+    b.dataset.id = id; b.textContent = nome;
+    b.setAttribute("aria-pressed", id === "piano" ? "true" : "false");
+    b.setAttribute("aria-label", "Instrumento: " + nome);
+    b.addEventListener("click", () => toggleChipInstrumento(b));
+    cont.appendChild(b);
+  });
+
+  const tog = document.getElementById("modo-eletronico");
+  if (tog) tog.addEventListener("change", (e) =>
+    cont.classList.toggle("desativado", e.target.checked));
+
+  const dur = document.getElementById("duracao");
+  const lbl = document.getElementById("duracao-label");
+  if (dur && lbl) {
+    const ref = () => lbl.textContent = fmtTempo(dur.value) + (dur.value >= 273 ? "  (4′33″)" : "");
+    dur.addEventListener("input", ref); ref();
+  }
+}
+
+function lerConfig() {
+  const electronico = !!document.getElementById("modo-eletronico")?.checked;
+  const dificuldade = (document.querySelector('input[name="dificuldade"]:checked') || {}).value || "intermedio";
+  const duracao = parseInt(document.getElementById("duracao")?.value, 10) || 75;
+  const ativos = [...document.querySelectorAll("#lista-instrumentos .chip.ativo")].map((c) => c.dataset.id);
+  const instrumentos = electronico ? ["piano", "violoncelo", "contrabaixo"]
+                                    : (ativos.length ? ativos : ["piano"]);
+  return { electronico, dificuldade, duracao, instrumentos };
+}
+
+// ---------------------------------------------------------------------
+//  PARES CURADOS — cada par junta um ponto com forte intervenção humana
+//  e outro de referência prístina dentro do mesmo bioma/clima.
+// ---------------------------------------------------------------------
+const PARES_SUGERIDOS = [
+  {
+    titulo: "Mineração polimetálica vs reserva alentejana",
+    intervencionado: {
+      nome: "Aljustrel", lat: 37.876, lon: -8.165,
+      porque: "Minas activas de cobre, zinco e chumbo na Faixa Piritosa"
+    },
+    pristino: {
+      nome: "Serra de São Mamede", lat: 39.310, lon: -7.380,
+      porque: "Parque natural alentejano em xistos não explorados"
+    }
+  },
+  {
+    titulo: "Petroquímica costeira vs litoral protegido",
+    intervencionado: {
+      nome: "Complexo de Sines", lat: 37.954, lon: -8.812,
+      porque: "Refinaria e zona industrial portuária com emissões fósseis"
+    },
+    pristino: {
+      nome: "Serra da Arrábida", lat: 38.490, lon: -8.985,
+      porque: "Parque natural costeiro em calcário, mesmo litoral atlântico"
+    }
+  },
+  {
+    titulo: "Acidente nuclear vs floresta primária temperada",
+    intervencionado: {
+      nome: "Chernobyl (zona de exclusão)", lat: 51.415, lon: 30.220,
+      porque: "Solo contaminado por radionuclídeos desde 1986"
+    },
+    pristino: {
+      nome: "Floresta de Białowieża", lat: 52.700, lon: 23.860,
+      porque: "Última floresta primária da Europa, mesma latitude"
+    }
+  },
+  {
+    titulo: "Agricultura intensiva sob plástico vs reserva semiárida",
+    intervencionado: {
+      nome: "Almería (mar de plásticos)", lat: 36.785, lon: -2.685,
+      porque: "Estufas intensivas com fertilização química há décadas"
+    },
+    pristino: {
+      nome: "Cabo de Gata", lat: 36.762, lon: -2.135,
+      porque: "Reserva semiárida andaluza adjacente, sem irrigação"
+    }
+  },
+  {
+    titulo: "Fundição de níquel vs reserva ártica da UNESCO",
+    intervencionado: {
+      nome: "Norilsk", lat: 69.350, lon: 88.180,
+      porque: "Maior emissor mundial de SO2, solo metalífero ácido"
+    },
+    pristino: {
+      nome: "Planalto de Putorana", lat: 69.000, lon: 94.500,
+      porque: "Reserva ártica intocada à mesma latitude siberiana"
+    }
+  }
+];
+
+// ---------------------------------------------------------------------
+//  MAPA (igual ao anterior)
+// ---------------------------------------------------------------------
 const mapa = L.map('mapa').setView([40, 0], 2);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap'
 }).addTo(mapa);
 
-let marcador = null;
-let ultimasNotas = null;
+const marcadores  = { A: null, B: null };
+const camadasOSM  = { A: null, B: null };
 
-// ===== SESSÃO DE ÁUDIO (recriável) =====
-let sessao = null;
+function criarIconeAB(slot) {
+  return L.divIcon({
+    className: 'marcador-ab',
+    html: `<div class="m-ab m-ab-${slot.toLowerCase()}">${slot}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  });
+}
+
+// ---------------------------------------------------------------------
+//  ESTADO CENTRAL
+//  estado.a / estado.b = { lat, lon, dados, estadoMsg, carregando }
+//  estado.modo = 'vazio' | 'single' | 'comparar'
+// ---------------------------------------------------------------------
+const estado = {
+  a: null,
+  b: null,
+  modo: 'vazio',
+};
+
+function recalcularModo() {
+  if (estado.a && estado.b) estado.modo = 'comparar';
+  else if (estado.a || estado.b) estado.modo = 'single';
+  else estado.modo = 'vazio';
+}
+
+// ---------------------------------------------------------------------
+//  ÁUDIO — duas sessões independentes (A e B) + controlo de pausa
+// ---------------------------------------------------------------------
+const sessoes = { A: null, B: null };
+let slotAtivo = null;              // 'A' | 'B' | null  — qual está actualmente a emitir som
+let tokensTimer = { A: 0, B: 0 };  // anula timers obsoletos quando se re-toca
+let toneIniciado = false;          // Tone.start() só pode ser chamado uma vez por gesto
+
+// Estado de pausa independente por slot (não partilha o AudioContext global)
+const slotState = {
+  A: { pausado: false, melodia: [], baixo: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 },
+  B: { pausado: false, melodia: [], baixo: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 },
+};
+
+function resetSlotState(slot) {
+  slotState[slot] = { pausado: false, melodia: [], baixo: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 };
+}
+
+// Timing e elementos SVG das notas de cada slot (para highlight sincronizado)
+const partituraInfo = {
+  A: { els: [], timings: [] },
+  B: { els: [], timings: [] },
+};
+const highlightTimers = { A: [], B: [] };
+
+// Aplica / remove estilo de highlight directamente nos paths SVG de um grupo de nota
+function setNotaHighlight(el, activa) {
+  if (!el) return;
+  el.querySelectorAll('path, rect').forEach(p => {
+    p.style.fill   = activa ? 'var(--musgo)' : '';
+    p.style.stroke = activa ? 'var(--musgo)' : '';
+  });
+}
+
+// Cancela timers e remove highlight visual de todas as notas do slot
+function limparHighlights(slot) {
+  highlightTimers[slot].forEach(id => clearTimeout(id));
+  highlightTimers[slot] = [];
+  (partituraInfo[slot]?.els || []).forEach(el => setNotaHighlight(el, false));
+}
+
+// Agenda os timeouts que iluminam cada nota, com offset 'elapsed' (segundos)
+function agendarHighlights(slot, elapsed = 0) {
+  limparHighlights(slot);
+  const info = partituraInfo[slot];
+  if (!info?.els.length) return;
+
+  info.timings.forEach((t, i) => {
+    if (t.inicio < elapsed - 0.05) return;   // já passou
+    const delay = Math.max(0, (t.inicio - elapsed + 0.15) * 1000);
+    const id = setTimeout(() => {
+      const cur = partituraInfo[slot];
+      if (!cur) return;
+      cur.els.forEach((el, j) => setNotaHighlight(el, j === i));
+    }, delay);
+    highlightTimers[slot].push(id);
+  });
+
+  // Apaga tudo quando a melodia termina
+  const fimRestante = info.timings
+    .filter(t => t.inicio >= elapsed - 0.05)
+    .reduce((acc, t) => Math.max(acc, t.inicio - elapsed + t.duracao), 0);
+  const endId = setTimeout(() => {
+    (partituraInfo[slot]?.els || []).forEach(el => setNotaHighlight(el, false));
+  }, (fimRestante + 0.15 + 0.4) * 1000);
+  highlightTimers[slot].push(endId);
+}
+
+async function garantirToneIniciado() {
+  if (!toneIniciado) {
+    await Tone.start();
+    toneIniciado = true;
+  }
+}
 
 function criarSessao(reverbMix = 0.2) {
-  const saida = new Tone.Gain(1).toDestination();
+  const saida  = new Tone.Gain(1).toDestination();
   const reverb = new Tone.Reverb({ decay: 3.5, wet: reverbMix }).connect(saida);
-  const piano = new Tone.Sampler({
+  const piano  = new Tone.Sampler({
     urls: {
       A2: "A2.mp3", A3: "A3.mp3", A4: "A4.mp3", A5: "A5.mp3",
       C3: "C3.mp3", C4: "C4.mp3", C5: "C5.mp3",
@@ -27,76 +273,215 @@ function criarSessao(reverbMix = 0.2) {
   return { piano, reverb, saida };
 }
 
-function destruirSessao() {
-  if (!sessao) return;
-  try { sessao.saida.gain.cancelScheduledValues(0); } catch (_) {}
-  try { sessao.saida.gain.setValueAtTime(0, Tone.now()); } catch (_) {}
-  try { sessao.piano.releaseAll(); } catch (_) {}
-  const velha = sessao;
+function destruirSessao(slot) {
+  const s = sessoes[slot];
+  if (!s) return;
+  try { s.saida.gain.cancelScheduledValues(0); } catch (_) {}
+  try { s.saida.gain.setValueAtTime(0, Tone.now()); } catch (_) {}
+  try { s.piano.releaseAll(); } catch (_) {}
   setTimeout(() => {
-    try { velha.piano.dispose();  } catch (_) {}
-    try { velha.reverb.dispose(); } catch (_) {}
-    try { velha.saida.dispose();  } catch (_) {}
-  }, 50);
-  sessao = null;
+    try { s.piano.dispose();  } catch (_) {}
+    try { s.reverb.dispose(); } catch (_) {}
+    try { s.saida.dispose();  } catch (_) {}
+  }, 90);
+  sessoes[slot] = null;
 }
 
-// ===== PARTITURA =====
-function desenharPartitura(melodia, baixo) {
-  const div = document.getElementById('partitura');
-  div.innerHTML = '';
+function silenciarOutras(slotActual) {
+  ['A', 'B'].forEach(outro => {
+    if (outro === slotActual) return;
+    const s = sessoes[outro];
+    if (!s) return;
+    // fade-out do gain (~80ms)
+    try {
+      const t = Tone.now();
+      s.saida.gain.cancelScheduledValues(t);
+      s.saida.gain.setTargetAtTime(0, t, 0.08);
+    } catch (_) {}
+    try { s.piano.releaseAll(); } catch (_) {}
+    // só marcar como "pausado" se estava efectivamente a tocar
+    if (slotAtivo === outro) {
+      slotState[outro].pausado = true;
+      slotState[outro].tPausa = Tone.now();
+      tokensTimer[outro]++;   // invalida o timer de fim pendente
+      slotAtivo = null;
+      // Cancela timers futuros mas mantém o highlight na última nota tocada
+      highlightTimers[outro].forEach(id => clearTimeout(id));
+      highlightTimers[outro] = [];
+      setEstadoMsg(outro, 'Pausado.', false);
+    }
+  });
+}
 
-  const VF = Vex.Flow;
-  const limiteMel = Math.min(melodia.length, 16);
-  const limiteBaixo = Math.min((baixo || []).length, 32);
-  const largura = Math.max(700, Math.max(limiteMel, limiteBaixo) * 50);
+// Toca notas num slot. Silencia o outro, agenda as notas, guarda estado por slot.
+// Devolve a duração total (segundos).
+async function tocarNotas(slot, melodia, baixo, reverbMix = 0.2) {
+  await garantirToneIniciado();
+  silenciarOutras(slot);
 
-  const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
-  renderer.resize(largura, 280);
-  const context = renderer.getContext();
-
-  // Pauta superior — clave de sol
-  const staveSup = new VF.Stave(10, 20, largura - 20);
-  staveSup.addClef('treble').setContext(context).draw();
-
-  // Pauta inferior — clave de fá
-  const staveInf = new VF.Stave(10, 140, largura - 20);
-  staveInf.addClef('bass').setContext(context).draw();
-
-  // Função auxiliar para converter as notas para VexFlow
-  function paraVexFlow(notas, limite, clef) {
-    return notas.slice(0, limite).map(n => {
-      const match = n.nota.match(/^([A-G]#?)(\d+)$/);
-      if (!match) return null;
-      const chave = `${match[1].toLowerCase()}/${match[2]}`;
-      let dur;
-      if      (n.duracao >= 2)   dur = 'h';
-      else if (n.duracao >= 1)   dur = 'q';
-      else if (n.duracao >= 0.5) dur = '8';
-      else                       dur = '16';
-
-      const nota = new VF.StaveNote({ clef, keys: [chave], duration: dur });
-      if (match[1].includes('#')) nota.addModifier(new VF.Accidental('#'), 0);
-      return nota;
-    }).filter(n => n !== null);
-  }
-
-  const notasMel  = paraVexFlow(melodia, limiteMel, 'treble');
-  const notasBaixo = paraVexFlow(baixo || [], limiteBaixo, 'bass');
-
+  if (!sessoes[slot]) sessoes[slot] = criarSessao(reverbMix);
+  const sess = sessoes[slot];
+  try { sess.piano.releaseAll(); } catch (_) {}
   try {
-    if (notasMel.length > 0)
-      VF.Formatter.FormatAndDraw(context, staveSup, notasMel);
-    if (notasBaixo.length > 0)
-      VF.Formatter.FormatAndDraw(context, staveInf, notasBaixo);
-  } catch (e) {
-    console.error('Erro VexFlow:', e);
-    div.innerHTML = '<p style="color:#999">Não foi possível desenhar a pauta.</p>';
-  }
+    const t = Tone.now();
+    sess.saida.gain.cancelScheduledValues(t);
+    sess.saida.gain.setTargetAtTime(1, t, 0.02);
+  } catch (_) {}
+  try {
+    sess.reverb.wet.setTargetAtTime(reverbMix, Tone.now(), 0.02);
+  } catch (_) {}
+
+  await Tone.loaded();
+  const tStart = Tone.now() + 0.15;
+  const todasNotas = melodia.concat(baixo || []);
+  const duracaoTotal = todasNotas.reduce((acc, n) => Math.max(acc, n.inicio + n.duracao), 0);
+  todasNotas.forEach(n => {
+    sess.piano.triggerAttackRelease(n.nota, n.duracao, tStart + n.inicio, n.velocity);
+  });
+
+  slotState[slot] = { pausado: false, melodia, baixo: baixo || [], reverbMix, tStart, tPausa: 0, duracaoTotal };
+  slotAtivo = slot;
+  agendarHighlights(slot, 0);
+  return duracaoTotal;
 }
 
-// ===== RENDERIZAR PARÂMETROS DO SOLO =====
-// Cada parâmetro com uma barra normalizada ao seu intervalo típico
+// pressionaPlay: chamado pelo botão de cada slot.
+// Três casos: (1) a tocar → pausar; (2) pausado → retomar; (3) inactivo → tocar do zero.
+// Pausa/retoma são 100% por slot — o AudioContext nunca é suspenso globalmente.
+async function pressionaPlay(slot) {
+  const s = slot.toLowerCase();
+  const dados = estado[s]?.dados;
+  if (!dados) return;
+
+  await garantirToneIniciado();
+  const st = slotState[slot];
+
+  // --- (1) Slot activo a tocar → pausar ---
+  if (slotAtivo === slot) {
+    const sess = sessoes[slot];
+    if (sess) {
+      try {
+        const t = Tone.now();
+        sess.saida.gain.cancelScheduledValues(t);
+        sess.saida.gain.setValueAtTime(0, t);   // mute imediato
+      } catch (_) {}
+      try { sess.piano.releaseAll(); } catch (_) {}
+    }
+    st.pausado = true;
+    st.tPausa = Tone.now();
+    tokensTimer[slot]++;   // invalida o timer de fim pendente
+    slotAtivo = null;
+    // Cancela timers futuros mas mantém o highlight visual na nota actual
+    highlightTimers[slot].forEach(id => clearTimeout(id));
+    highlightTimers[slot] = [];
+    setEstadoMsg(slot, 'Pausado.', false);
+    actualizarBotoesPlay();
+    return;
+  }
+
+  // --- (2) Slot pausado → retomar ---
+  if (st.pausado && (st.melodia.length > 0 || st.baixo.length > 0)) {
+    const elapsed = st.tPausa - st.tStart;
+    const todasNotas = st.melodia.concat(st.baixo);
+    const notasRestantes = todasNotas.filter(n => n.inicio > elapsed);
+
+    if (notasRestantes.length > 0) {
+      // Re-agendar notas que ainda não tinham tocado
+      if (!sessoes[slot]) sessoes[slot] = criarSessao(st.reverbMix);
+      const sess = sessoes[slot];
+      silenciarOutras(slot);
+      try {
+        const t = Tone.now();
+        sess.saida.gain.cancelScheduledValues(t);
+        sess.saida.gain.setTargetAtTime(1, t, 0.02);
+      } catch (_) {}
+      await Tone.loaded();
+      const tNewStart = Tone.now() + 0.15;
+      notasRestantes.forEach(n => {
+        sess.piano.triggerAttackRelease(
+          n.nota, n.duracao, tNewStart + (n.inicio - elapsed), n.velocity
+        );
+      });
+      const novaDuracao = notasRestantes.reduce(
+        (acc, n) => Math.max(acc, (n.inicio - elapsed) + n.duracao), 0
+      );
+      // actualizar estado para futuras pausas nesta sessão
+      st.pausado = false;
+      st.tStart  = tNewStart - elapsed;  // base equivalente para re-pausar correctamente
+      st.tPausa  = 0;
+      st.duracaoTotal = novaDuracao;
+      slotAtivo = slot;
+      agendarHighlights(slot, elapsed);
+
+      setEstadoMsg(slot, 'A tocar...', false);
+      const meuToken = ++tokensTimer[slot];
+      setTimeout(() => {
+        if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
+          slotAtivo = null;
+          setEstadoMsg(slot, msgPronto(), false);
+          actualizarBotoesPlay();
+        }
+      }, novaDuracao * 1000 + 250);
+    } else {
+      // Todas as notas já passaram — recomeçar do início
+      st.pausado = false;
+      setEstadoMsg(slot, 'A tocar...', false);
+      const duracao = await tocarNotas(slot, st.melodia, st.baixo, st.reverbMix);
+      const meuToken = ++tokensTimer[slot];
+      setTimeout(() => {
+        if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
+          slotAtivo = null;
+          setEstadoMsg(slot, msgPronto(), false);
+          actualizarBotoesPlay();
+        }
+      }, duracao * 1000 + 250);
+    }
+    actualizarBotoesPlay();
+    return;
+  }
+
+  // --- (3) Slot inactivo (nunca tocou ou já terminou) → tocar do zero ---
+  setEstadoMsg(slot, 'A tocar...', false);
+  const duracao = await tocarNotas(slot, dados.melodia, dados.baixo, dados.musica.reverb_mix);
+  const meuToken = ++tokensTimer[slot];
+  setTimeout(() => {
+    if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
+      slotAtivo = null;
+      setEstadoMsg(slot, msgPronto(), false);
+      actualizarBotoesPlay();
+    }
+  }, duracao * 1000 + 250);
+  actualizarBotoesPlay();
+}
+
+const ICONE_PLAY  = '<path d="M6 4l14 8-14 8z"/>';
+const ICONE_PAUSE = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>';
+
+function actualizarBotoesPlay() {
+  ['A', 'B'].forEach(slot => {
+    const s = slot.toLowerCase();
+    const btn = document.getElementById(`btn-tocar-${s}`);
+    if (!btn) return;
+    const span = btn.querySelector('.btn-label');
+    const svg  = btn.querySelector('svg');
+    if (!span || !svg) return;
+
+    if (slotAtivo === slot) {
+      span.textContent = 'Pausar';
+      svg.innerHTML = ICONE_PAUSE;
+    } else if (slotState[slot].pausado) {
+      span.textContent = 'Retomar';
+      svg.innerHTML = ICONE_PLAY;
+    } else {
+      span.textContent = (estado.modo === 'comparar') ? `Tocar ${slot}` : 'Tocar de novo';
+      svg.innerHTML = ICONE_PLAY;
+    }
+  });
+}
+
+// ---------------------------------------------------------------------
+//  ESCALAS / LABELS para os parâmetros do solo
+// ---------------------------------------------------------------------
 const ESCALAS_PARAM = {
   pH:                    { min: 3, max: 10, unidade: '' },
   carbono_organico_g_kg: { min: 0, max: 80, unidade: 'g/kg' },
@@ -108,7 +493,6 @@ const ESCALAS_PARAM = {
   densidade_g_cm3:       { min: 0.8, max: 2.0, unidade: 'g/cm³' },
   pedregoso_pct:         { min: 0, max: 80, unidade: '%' },
 };
-
 const LABELS_PARAM = {
   pH: 'pH',
   carbono_organico_g_kg: 'Carbono org.',
@@ -121,7 +505,7 @@ const LABELS_PARAM = {
   pedregoso_pct: 'Pedregosidade',
 };
 
-function renderParam(chave, valor) {
+function paramHTML(chave, valor) {
   const cfg = ESCALAS_PARAM[chave];
   if (!cfg || valor == null) return '';
   const pct = Math.max(0, Math.min(100, ((valor - cfg.min) / (cfg.max - cfg.min)) * 100));
@@ -133,63 +517,6 @@ function renderParam(chave, valor) {
     </div>`;
 }
 
-function renderSolo(solo) {
-  const ordem = ['pH', 'carbono_organico_g_kg', 'azoto_g_kg',
-                 'areia_pct', 'argila_pct', 'limo_pct',
-                 'cec', 'densidade_g_cm3', 'pedregoso_pct'];
-  let html = ordem.map(k => renderParam(k, solo[k])).join('');
-
-  // Textura
-  if (solo.textura && solo.textura !== 'indefinida') {
-    html += `<div class="param"><span class="nome">Textura</span>
-             <span style="grid-column: 2 / 4; font-family: ui-monospace, monospace; font-size:12px;">
-             ${solo.textura}</span></div>`;
-  }
-
-  // Retenção de água
-  if (solo.retencao_agua) {
-    const a = solo.retencao_agua;
-    html += `<div style="margin-top:10px; padding-top:10px; border-top:1px solid #eee;">
-      <div class="param">
-        <span class="nome">Água disponível</span>
-        <div class="barra"><div style="width:${Math.min(100, a.awc_pct * 4)}%; background:#3a7a8a"></div></div>
-        <span class="valor">${a.awc_pct}%</span>
-      </div>
-      <div class="param">
-        <span class="nome">Cap. de campo</span>
-        <div class="barra"><div style="width:${a.capacidade_campo_pct}%; background:#3a7a8a"></div></div>
-        <span class="valor">${a.capacidade_campo_pct}%</span>
-      </div>
-      <div class="param">
-        <span class="nome">Ponto de murcha</span>
-        <div class="barra"><div style="width:${a.ponto_murcha_pct}%; background:#3a7a8a"></div></div>
-        <span class="valor">${a.ponto_murcha_pct}%</span>
-      </div>
-      <div style="font-size:12px; color:#666; margin-top:4px;">Retenção: <b>${a.classe}</b></div>
-    </div>`;
-  }
-
-  document.getElementById('solo-params').innerHTML = html;
-}
-
-function renderMusica(m) {
-  const linhas = [
-    ['Escala',         m.escala],
-    ['Tónica',         m.tonica],
-    ['Andamento',      m.bpm + ' BPM'],
-    ['Nº de notas',    m.n_notas],
-    ['Sustain',        '×' + m.sustain],
-    ['Reverb',         (m.reverb_mix * 100).toFixed(0) + '%'],
-    ['Prob. silêncio', (m.prob_silencio * 100).toFixed(0) + '%'],
-    ['Prob. dissonância', (m.prob_dissonancia * 100).toFixed(0) + '%'],
-    ['Prob. acorde',   (m.prob_acorde * 100).toFixed(0) + '%'],
-  ];
-  document.getElementById('musica-params').innerHTML =
-    '<div class="musica-grid">' +
-    linhas.map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('') +
-    '</div>';
-}
-// ===== RENDERIZAR PRESSÃO HUMANA =====
 const ROTULOS_CAT = {
   mina: "⛏ Minas / pedreiras",
   industria_pesada: "🏭 Indústria pesada (química, refinaria, fundição)",
@@ -198,11 +525,99 @@ const ROTULOS_CAT = {
   industria_geral: "🏗 Zonas industriais",
   agricultura_intensiva: "🌾 Agricultura intensiva",
 };
+const CORES_OSM = {
+  mina: "#8b2c00",
+  industria_pesada: "#c4341a",
+  central_termica: "#7a5500",
+  aterro: "#5a4a3a",
+  industria_geral: "#999999",
+  agricultura_intensiva: "#a8a04a",
+};
 
-let camadaPontosOSM = null;
+// ---------------------------------------------------------------------
+//  RENDERIZADORES (por slot)
+// ---------------------------------------------------------------------
+function renderSolo(slot, solo) {
+  const div = document.getElementById(`solo-params-${slot.toLowerCase()}`);
+  if (!div) return;
+  const ordem = ['pH', 'carbono_organico_g_kg', 'azoto_g_kg',
+                 'areia_pct', 'argila_pct', 'limo_pct',
+                 'cec', 'densidade_g_cm3', 'pedregoso_pct'];
+  let html = ordem.map(k => paramHTML(k, solo[k])).join('');
 
-function renderPressaoHumana(ph) {
-  const div = document.getElementById('pressao-humana');
+  if (solo.textura && solo.textura !== 'indefinida') {
+    html += `<div class="param"><span class="nome">Textura</span>
+             <span style="grid-column: 2 / 4; font-family: var(--mono); font-size:12px;">
+             ${solo.textura}</span></div>`;
+  }
+
+  if (solo.retencao_agua) {
+    const a = solo.retencao_agua;
+    html += `<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--linha);">
+      <div class="param">
+        <span class="nome">Água disponível</span>
+        <div class="barra"><div style="width:${Math.min(100, a.awc_pct * 4)}%"></div></div>
+        <span class="valor">${a.awc_pct}%</span>
+      </div>
+      <div class="param">
+        <span class="nome">Cap. de campo</span>
+        <div class="barra"><div style="width:${a.capacidade_campo_pct}%"></div></div>
+        <span class="valor">${a.capacidade_campo_pct}%</span>
+      </div>
+      <div class="param">
+        <span class="nome">Ponto de murcha</span>
+        <div class="barra"><div style="width:${a.ponto_murcha_pct}%"></div></div>
+        <span class="valor">${a.ponto_murcha_pct}%</span>
+      </div>
+      <div style="font-size:12px; color:var(--tinta-leve); margin-top:4px;">
+        Retenção: <b style="color:var(--tinta);">${a.classe}</b>
+      </div>
+    </div>`;
+  }
+  div.innerHTML = html;
+}
+
+function pct0(x) { return Math.round((x || 0) * 100) + '%'; }
+function renderMusica(slot, m) {
+  const div = document.getElementById(`musica-params-${slot.toLowerCase()}`);
+  if (!div) return;
+  const linhas = [
+    ['Tonalidade',     m.tonalidade || m.escala || '—'],
+    ['Compasso',       m.compasso || '—'],
+    ['Andamento',      (m.bpm ?? '—') + ' BPM'],
+    ['Dificuldade',    m.dificuldade || '—'],
+    ['Duração',        fmtTempo(m.duracao_seg || 0)],
+    ['Nº compassos',   m.n_compassos ?? '—'],
+    ['Frase',          (m.frase_compassos ?? '—') + ' comp.'],
+    ['Vivacidade',     pct0(m.vivacidade)],
+    ['Reverberação',   pct0(m.reverb_mix)],
+    ['Prob. salto',    pct0(m.prob_salto)],
+    ['Prob. silêncio', pct0(m.prob_silencio)],
+    ['Prob. staccato', pct0(m.prob_staccato)],
+    ['Prob. acorde',   pct0(m.prob_acorde)],
+    ['Cromatismo',     pct0(m.prob_cromatico)],
+    ['Dissonância',    pct0(m.prob_dissonancia)],
+  ];
+  div.innerHTML =
+    '<div class="musica-grid">' +
+    linhas.map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('') +
+    '</div>';
+}
+function renderExplicacao(slot, cartoes) {
+  const div = document.getElementById(`explicacao-${slot.toLowerCase()}`);
+  if (!div) return;
+  if (!cartoes || !cartoes.length) {
+    div.innerHTML = '<p class="placeholder">Sem leitura.</p>';
+    return;
+  }
+  div.innerHTML = '<div class="legenda">' + cartoes.map(c =>
+    `<div class="cartao ${c.tipo}"><div class="ct">${c.titulo}</div><div class="cx">${c.texto}</div></div>`
+  ).join('') + '</div>';
+}
+
+function renderPressaoHumana(slot, ph) {
+  const div = document.getElementById(`pressao-humana-${slot.toLowerCase()}`);
+  if (!div) return;
   if (!ph || !ph.disponivel) {
     div.innerHTML = '<p class="placeholder">Sem dados de pressão humana ' +
       (ph?.erro ? '(falha de ligação ao OSM)' : '') + '</p>';
@@ -211,7 +626,7 @@ function renderPressaoHumana(ph) {
 
   const total = Object.values(ph.contagens).reduce((s, n) => s + n, 0);
   if (total === 0) {
-    div.innerHTML = `<p style="color:#5a7a3a; font-size:13px;">
+    div.innerHTML = `<p style="color: var(--musgo-escuro); font-size: var(--t-sm);">
       Nenhuma fonte conhecida de pressão humana num raio de ${ph.raio_km} km.</p>`;
   } else {
     const linhas = Object.entries(ph.contagens)
@@ -224,37 +639,32 @@ function renderPressaoHumana(ph) {
         </div>`).join('');
 
     div.innerHTML = `
-      <div style="font-size:12px; color:#666; margin-bottom:8px;">
-        Num raio de ${ph.raio_km} km — score: <b>${ph.score}</b>
+      <div style="font-size:12px; color:var(--tinta-leve); margin-bottom:8px;">
+        Num raio de ${ph.raio_km} km — score: <b style="color:var(--tinta);">${ph.score}</b>
       </div>
       ${linhas}`;
   }
 
-  // Desenhar pontos no mapa
-  if (camadaPontosOSM) mapa.removeLayer(camadaPontosOSM);
-  camadaPontosOSM = L.layerGroup();
-  const cores = {
-    mina: "#8b2c00",
-    industria_pesada: "#c4341a",
-    central_termica: "#7a5500",
-    aterro: "#5a4a3a",
-    industria_geral: "#999999",
-    agricultura_intensiva: "#a8a04a",
-  };
+  // pontos no mapa — uma camada por slot
+  if (camadasOSM[slot]) mapa.removeLayer(camadasOSM[slot]);
+  camadasOSM[slot] = L.layerGroup();
   ph.elementos.forEach(el => {
     L.circleMarker([el.lat, el.lon], {
       radius: 6,
-      color: cores[el.categoria] || "#666",
-      fillColor: cores[el.categoria] || "#666",
+      color: CORES_OSM[el.categoria] || "#666",
+      fillColor: CORES_OSM[el.categoria] || "#666",
       fillOpacity: 0.7,
       weight: 1,
-    }).bindPopup(`<b>${el.nome}</b><br>${ROTULOS_CAT[el.categoria] || el.categoria}`)
-      .addTo(camadaPontosOSM);
+    }).bindPopup(`<b>${el.nome}</b><br>${ROTULOS_CAT[el.categoria] || el.categoria}` +
+                 `<br><span style="font-size:11px; color:#888;">amostra ${slot}</span>`)
+      .addTo(camadasOSM[slot]);
   });
-  camadaPontosOSM.addTo(mapa);
+  camadasOSM[slot].addTo(mapa);
 }
-function renderAvisos(solo) {
-  const div = document.getElementById('avisos-bloco');
+
+function renderAvisos(slot, solo) {
+  const div = document.getElementById(`avisos-bloco-${slot.toLowerCase()}`);
+  if (!div) return;
   const avisos = solo.avisos || [];
   const score = solo.saude_score ?? 10;
   if (avisos.length === 0) {
@@ -267,104 +677,764 @@ function renderAvisos(solo) {
   }
 }
 
-// ===== TOCAR =====
-async function tocarNotas(melodia, baixo, reverbMix = 0.2) {
-  await Tone.start();
-  destruirSessao();
-  sessao = criarSessao(reverbMix);
-  const { piano } = sessao;
-
-  await Tone.loaded();
-
-  const agora = Tone.now() + 0.15;
-  melodia.forEach(n => {
-    piano.triggerAttackRelease(n.nota, n.duracao, agora + n.inicio, n.velocity);
-  });
-  if (baixo) {
-    baixo.forEach(n => {
-      piano.triggerAttackRelease(n.nota, n.duracao, agora + n.inicio, n.velocity);
-    });
+function criarStaveNoteVF(VF, n, clave) {
+  if (n.is_rest) {
+    const key = clave === 'bass' ? 'd/3' : 'b/4';
+    return new VF.StaveNote({ clef: clave, keys: [key], duration: n.vex_dur });
   }
+  const tons = [n, ...(n.acorde || [])];
+  const keys = tons.map(t => t.vexkey);
+  const sn = new VF.StaveNote({ clef: clave, keys, duration: n.vex_dur });
+  tons.forEach((t, i) => { if (t.vex_acc) { try { sn.addModifier(new VF.Accidental(t.vex_acc), i); } catch (_) {} } });
+  if (n.staccato) { try { sn.addModifier(new VF.Articulation('a.').setPosition(3), 0); } catch (_) {} }
+  return sn;
 }
 
-// ===== LIMPAR PAINÉIS =====
-function limparPaineis() {
-  document.getElementById('solo-params').innerHTML =
-    '<p class="placeholder">Ainda sem leitura.</p>';
-  document.getElementById('musica-params').innerHTML =
-    '<p class="placeholder">Ainda sem leitura.</p>';
-  document.getElementById('pressao-humana').innerHTML =
-    '<p class="placeholder">Ainda sem leitura.</p>';
-  document.getElementById('avisos-bloco').innerHTML = '';
-  document.getElementById('partitura').innerHTML = '';
+// Desenha a pauta a partir de `dados` (contrato novo: partes + musica),
+// com armação, compasso e barras. Reconstrói os timings/elementos da melodia
+// para manter o highlight sincronizado. Mostra ~12 compassos (a peça completa
+// fica no MusicXML exportado).
+function desenharPartitura(slot, dados) {
+  const div = document.getElementById(`partitura-${slot.toLowerCase()}`);
+  if (!div) return;
+  div.innerHTML = '';
+  partituraInfo[slot] = { els: [], timings: [] };
 
-  // remover pontos OSM do mapa
-  if (camadaPontosOSM) {
-    mapa.removeLayer(camadaPontosOSM);
-    camadaPontosOSM = null;
+  const partes = dados && dados.partes;
+  const musica = dados && dados.musica;
+  if (!partes || !partes.length || !musica) {
+    div.innerHTML = '<p class="placeholder">Sem partitura.</p>';
+    return;
   }
 
-  // invalidar a sessão de áudio anterior
-  ultimasNotas = null;
-  document.getElementById('btn-tocar').disabled = true;
-}
+  const VF = Vex.Flow;
+  const meter = musica.compasso || '4/4';
+  const numBeats = musica.compasso_num || 4;
+  const beatValue = musica.compasso_den || 4;
+  const keySpec = musica.keysig_vexflow || 'C';
+  const nV = partes.length;
+  const totalM = partes[0].compassos.length;
+  const maxComp = Math.min(totalM, 12);
 
-// ===== CLIQUE NO MAPA =====
-mapa.on('click', async (e) => {
-  const { lat, lng } = e.latlng;
+  const largura = Math.max(div.clientWidth || 700, 700);
+  const Wbase = 200, Wfirst = 270, staveGap = 92, padTop = 10;
+  const perRow = Math.max(1, Math.min(4, Math.floor((largura - 20) / 230)));
+  const rows = Math.ceil(maxComp / perRow);
+  const rowHeight = nV * staveGap + 36;
+  const totalW = 10 + Wfirst + (perRow - 1) * Wbase + 14;
+  const totalH = rows * rowHeight + 16;
 
-  destruirSessao();
-  limparPaineis();                         // <-- limpa tudo antes de pedir novos dados
-
-  document.getElementById('coord').textContent =
-    `Lat: ${lat.toFixed(3)}   Lon: ${lng.toFixed(3)}`;
-  document.getElementById('estado').textContent = 'A buscar dados do solo...';
-  document.getElementById('estado').classList.add('carregando');
-
-  if (marcador) mapa.removeLayer(marcador);
-  marcador = L.marker([lat, lng]).addTo(mapa);
-
+  let renderer, ctx;
   try {
-    const r = await fetch(`${API_URL}/gerar?lat=${lat}&lon=${lng}`);
+    renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+    renderer.resize(totalW, totalH);
+    ctx = renderer.getContext();
+  } catch (e) {
+    div.innerHTML = '<p class="placeholder">Não foi possível desenhar a pauta.</p>';
+    return;
+  }
+
+  const elsMel = [], timingsMel = [];
+  const idxMelodia = Math.max(0, partes.findIndex(p => p.papel === 'melodia'));
+
+  for (let m = 0; m < maxComp; m++) {
+    const row = Math.floor(m / perRow), col = m % perRow;
+    const primeira = col === 0;
+    const x = primeira ? 10 : (10 + Wfirst + (col - 1) * Wbase);
+    const w = primeira ? Wfirst : Wbase;
+    const yRow = padTop + row * rowHeight;
+    const pautas = [];
+
+    for (let vi = 0; vi < nV; vi++) {
+      const parte = partes[vi];
+      const clave = parte.clef;
+      const stave = new VF.Stave(x, yRow + vi * staveGap, w);
+      if (primeira) {
+        stave.addClef(clave);
+        try { stave.addKeySignature(keySpec); } catch (_) {}
+        if (row === 0) { try { stave.addTimeSignature(meter); } catch (_) {} }
+      }
+      stave.setContext(ctx).draw();
+      pautas.push(stave);
+
+      const med = parte.compassos[m] || [];
+      const notas = med.map(n => criarStaveNoteVF(VF, n, clave));
+      try {
+        const voice = new VF.Voice({ num_beats: numBeats, beat_value: beatValue });
+        if (voice.setMode && VF.Voice.Mode) voice.setMode(VF.Voice.Mode.SOFT);
+        else if (voice.setStrict) voice.setStrict(false);
+        voice.addTickables(notas);
+        new VF.Formatter().joinVoices([voice]).format([voice], w - (primeira ? 86 : 22));
+        voice.draw(ctx, stave);
+        try { VF.Beam.generateBeams(notas.filter(sn => !sn.isRest())).forEach(b => b.setContext(ctx).draw()); } catch (_) {}
+        if (vi === idxMelodia) {
+          med.forEach((n, k) => {
+            if (n.is_rest) return;
+            elsMel.push(notas[k].attrs?.el ?? null);
+            timingsMel.push({ inicio: n.inicio_seg, duracao: n.duracao_seg });
+          });
+        }
+      } catch (e) { console.warn('compasso', m, 'parte', vi, e); }
+    }
+
+    if (primeira && nV > 1) {
+      try {
+        const conn = new VF.StaveConnector(pautas[0], pautas[nV - 1]);
+        conn.setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw();
+      } catch (_) {}
+    }
+  }
+  partituraInfo[slot] = { els: elsMel, timings: timingsMel };
+}
+
+// ---------------------------------------------------------------------
+//  EXPORTAÇÃO — MusicXML + MIDI (do servidor) e WAV (render offline)
+// ---------------------------------------------------------------------
+const _NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const midiNome = (m) => _NN[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+function nomeParaMidi(nome) {
+  const m = String(nome).match(/^([A-G])(#|b)?(-?\d+)$/);
+  if (!m) return 48;
+  const base = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 }[m[1]];
+  const acc = m[2] === '#' ? 1 : (m[2] === 'b' ? -1 : 0);
+  return base + acc + 12 * (parseInt(m[3], 10) + 1);
+}
+function descarregar(blob, nome) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = nome;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function exportarMusicXML(slot) {
+  const d = estado[slot.toLowerCase()]?.dados;
+  if (!d?.exportacao?.musicxml) return;
+  descarregar(new Blob([d.exportacao.musicxml], { type: 'application/vnd.recordare.musicxml+xml' }),
+    `curiousoil_${slot}.musicxml`);
+}
+function exportarMIDI(slot) {
+  const d = estado[slot.toLowerCase()]?.dados;
+  if (!d?.exportacao?.midi_base64) return;
+  const bin = atob(d.exportacao.midi_base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  descarregar(new Blob([bytes], { type: 'audio/midi' }), `curiousoil_${slot}.mid`);
+}
+function bufferParaWav(ab) {
+  const nCh = ab.numberOfChannels, sr = ab.sampleRate, len = ab.length;
+  const blockAlign = nCh * 2, dataSize = len * blockAlign;
+  const buf = new ArrayBuffer(44 + dataSize), view = new DataView(buf);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, nCh, true);
+  view.setUint32(24, sr, true); view.setUint32(28, sr * blockAlign, true);
+  view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true);
+  ws(36, 'data'); view.setUint32(40, dataSize, true);
+  const chans = []; for (let c = 0; c < nCh; c++) chans.push(ab.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < len; i++) for (let c = 0; c < nCh; c++) {
+    let s = Math.max(-1, Math.min(1, chans[c][i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2;
+  }
+  return new Blob([view], { type: 'audio/wav' });
+}
+function criarVozRender(papel, electronico) {
+  let s;
+  if (electronico) {
+    if (papel === 'baixo') {
+      s = new Tone.MonoSynth({ oscillator: { type: 'sine' }, envelope: { attack: 0.05, decay: 0.3, sustain: 0.85, release: 2.6 } });
+      s.volume.value = -8;
+    } else if (papel === 'harmonia') {
+      s = new Tone.PolySynth(Tone.Synth); s.set({ oscillator: { type: 'sawtooth' }, envelope: { attack: 1.4, decay: 0.6, sustain: 0.7, release: 4 } }); s.volume.value = -14;
+    } else {
+      s = new Tone.PolySynth(Tone.Synth); s.set({ oscillator: { type: 'triangle' }, envelope: { attack: 0.3, decay: 0.4, sustain: 0.6, release: 2.4 } }); s.volume.value = -7;
+    }
+    return s;
+  }
+  if (papel === 'baixo') {
+    s = new Tone.MonoSynth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.8 } }); s.volume.value = -6;
+  } else {
+    s = new Tone.PolySynth(Tone.Synth); s.set({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.4, sustain: 0.3, release: 0.9 } }); s.volume.value = -6;
+  }
+  return s;
+}
+async function exportarWAV(slot) {
+  const d = estado[slot.toLowerCase()]?.dados;
+  if (!d || (!d.melodia && !d.baixo)) return;
+  const btn = document.getElementById(`btn-wav-${slot.toLowerCase()}`);
+  if (btn) btn.disabled = true;
+  setEstadoMsg(slot, 'A gerar áudio (WAV)…', true);
+  const electronico = d.musica?.modo_geracao === 'electronico';
+  const mel = d.melodia || [], bx = d.baixo || [];
+  const fim = [...mel, ...bx].reduce((a, n) => Math.max(a, n.inicio + n.duracao), 0);
+  const dur = fim + (electronico ? 3 : 1.5) + 0.2;
+  try {
+    await garantirToneIniciado();
+    const ab = await Tone.Offline(() => {
+      const master = new Tone.Gain(0.9).toDestination();
+      const reverb = new Tone.Freeverb({ roomSize: electronico ? 0.85 : 0.6, dampening: 3000, wet: d.musica?.reverb_mix ?? 0.2 }).connect(master);
+      let entrada = reverb;
+      if (electronico) entrada = new Tone.FeedbackDelay({ delayTime: 0.38, feedback: 0.3, wet: 0.25 }).connect(reverb);
+      const sMel = criarVozRender('melodia', electronico); sMel.connect(entrada);
+      const sBx = criarVozRender('baixo', electronico); sBx.connect(entrada);
+      const escala = electronico ? 1.4 : 1.05;
+      mel.forEach(n => { try { sMel.triggerAttackRelease(n.nota, Math.max(0.08, n.duracao * escala), n.inicio + 0.1, n.velocity); } catch (_) {} });
+      bx.forEach(n => { try { sBx.triggerAttackRelease(n.nota, Math.max(0.08, n.duracao * escala), n.inicio + 0.1, n.velocity); } catch (_) {} });
+      if (electronico && bx.length) {
+        let raiz = Infinity; bx.forEach(n => { const mm = nomeParaMidi(n.nota); if (mm < raiz) raiz = mm; });
+        if (isFinite(raiz)) {
+          const pad = new Tone.PolySynth(Tone.Synth);
+          pad.set({ oscillator: { type: 'sine' }, envelope: { attack: 3, decay: 1, sustain: 0.9, release: 6 } });
+          pad.volume.value = -18; pad.connect(entrada);
+          pad.triggerAttackRelease([midiNome(raiz - 12), midiNome(raiz - 5)], fim + 2, 0.1);
+        }
+      }
+    }, dur);
+    const native = ab.get ? ab.get() : ab;
+    descarregar(bufferParaWav(native), `curiousoil_${slot}_${Date.now()}.wav`);
+    setEstadoMsg(slot, msgPronto(), false);
+  } catch (e) {
+    console.warn('WAV falhou', e);
+    setEstadoMsg(slot, 'Não foi possível gerar o WAV.', false);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+function wireExportar(slot) {
+  const s = slot.toLowerCase();
+  const map = [['btn-xml-' + s, exportarMusicXML], ['btn-midi-' + s, exportarMIDI], ['btn-wav-' + s, exportarWAV]];
+  map.forEach(([id, fn]) => {
+    const b = document.getElementById(id);
+    if (b) { b.disabled = false; b.onclick = () => fn(slot); }
+  });
+}
+
+// ---------------------------------------------------------------------
+//  CONSTRUÇÃO DOS PAINÉIS (HTML)
+// ---------------------------------------------------------------------
+function htmlPainel(slot) {
+  const s = slot.toLowerCase();
+  const fecharBtn = slot === 'B'
+    ? `<button class="btn-fechar" id="btn-fechar-b" title="Fechar amostra B">✕ Fechar B</button>`
+    : '<span></span>';
+  const labelBtn = slot === 'A' && estado.modo !== 'comparar'
+    ? 'Tocar de novo'
+    : `Tocar ${slot}`;
+
+  return `
+    <div class="painel lado lado-${s}">
+      <div class="lado-cab">
+        <span class="lado-tag">Amostra ${slot}</span>
+        ${fecharBtn}
+      </div>
+
+      <div class="caixa">
+        <h3>Localização</h3>
+        <p class="coord" id="coord-${s}">— · —</p>
+        <p class="estado" id="estado-${s}"></p>
+        <button class="btn-tocar" id="btn-tocar-${s}" disabled>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M6 4l14 8-14 8z"/>
+          </svg>
+          <span class="btn-label">${labelBtn}</span>
+        </button>
+        <div id="avisos-bloco-${s}"></div>
+      </div>
+
+      <div class="caixa">
+        <h3>Parâmetros do solo</h3>
+        <div id="solo-params-${s}"><p class="placeholder">Ainda sem leitura. Clica no mapa para começar.</p></div>
+      </div>
+
+      <div class="caixa">
+        <h3>Pressão humana próxima</h3>
+        <div id="pressao-humana-${s}"><p class="placeholder">Ainda sem leitura.</p></div>
+      </div>
+
+      <div class="caixa">
+        <h3>Parâmetros musicais</h3>
+        <div id="musica-params-${s}"><p class="placeholder">Ainda sem leitura.</p></div>
+      </div>
+
+      <div class="caixa larga">
+        <h3>Como o solo virou música</h3>
+        <div id="explicacao-${s}"><p class="placeholder">Sem leitura.</p></div>
+      </div>
+
+      <div class="caixa larga partitura">
+        <h3>Partitura
+          <span class="acoes-part">
+            <button class="mini-export" id="btn-xml-${s}" disabled title="Abre no MuseScore/Finale">MusicXML</button>
+            <button class="mini-export" id="btn-midi-${s}" disabled title="Ficheiro MIDI">MIDI</button>
+            <button class="mini-export" id="btn-wav-${s}" disabled title="Áudio WAV">WAV</button>
+          </span>
+        </h3>
+        <div class="part-svg-wrap" id="partitura-${s}"></div>
+      </div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------
+//  renderEstado — redesenha o painel a partir do estado central
+// ---------------------------------------------------------------------
+function renderEstado() {
+  const cont = document.getElementById('painel-container');
+  recalcularModo();
+  cont.classList.toggle('comparar', estado.modo === 'comparar');
+
+  // Slots a mostrar
+  const slots = [];
+  if (estado.modo === 'vazio') slots.push('A');                       // shell vazio para A
+  if (estado.a) slots.push('A');
+  if (estado.b) slots.push('B');
+  // garantir unicidade
+  const slotsUnicos = [...new Set(slots)];
+
+  cont.innerHTML = slotsUnicos.map(htmlPainel).join('');
+
+  // popular cada slot a partir do estado
+  slotsUnicos.forEach(slot => {
+    const dados = estado[slot.toLowerCase()];
+    const s = slot.toLowerCase();
+
+    if (dados) {
+      const coordEl = document.getElementById(`coord-${s}`);
+      if (coordEl) {
+        coordEl.textContent = `Lat: ${dados.lat.toFixed(3)}   Lon: ${dados.lon.toFixed(3)}`;
+      }
+      const estadoEl = document.getElementById(`estado-${s}`);
+      if (estadoEl) {
+        estadoEl.textContent = dados.estadoMsg || '';
+        estadoEl.classList.toggle('carregando', !!dados.carregando);
+      }
+      if (dados.dados && !dados.dados.erro) {
+        renderSolo(slot, dados.dados.solo);
+        renderMusica(slot, dados.dados.musica);
+        renderExplicacao(slot, dados.dados.musica.explicacao);
+        renderPressaoHumana(slot, dados.dados.pressao_humana);
+        renderAvisos(slot, dados.dados.solo);
+        desenharPartitura(slot, dados.dados);
+        const btn = document.getElementById(`btn-tocar-${s}`);
+        if (btn) btn.disabled = false;
+        wireExportar(slot);
+      }
+    }
+
+    // botão tocar / pausar / retomar
+    const btn = document.getElementById(`btn-tocar-${s}`);
+    if (btn) {
+      btn.addEventListener('click', () => pressionaPlay(slot));
+    }
+
+    // botão fechar (só B)
+    if (slot === 'B') {
+      const fechar = document.getElementById('btn-fechar-b');
+      if (fechar) fechar.addEventListener('click', () => fecharSlot('B'));
+    }
+  });
+}
+
+function msgPronto() {
+  return estado.modo === 'comparar'
+    ? 'Pronto. Clica para comparar ou substituir.'
+    : 'Pronto. Clica noutro ponto ou repete.';
+}
+
+function setEstadoMsg(slot, msg, carregando = false) {
+  const s = slot.toLowerCase();
+  if (estado[s]) {
+    estado[s].estadoMsg = msg;
+    estado[s].carregando = carregando;
+  }
+  const el = document.getElementById(`estado-${s}`);
+  if (el) {
+    el.textContent = msg;
+    el.classList.toggle('carregando', carregando);
+  }
+}
+
+// ---------------------------------------------------------------------
+//  FECHAR SLOT B (volta a modo single)
+// ---------------------------------------------------------------------
+function fecharSlot(slot) {
+  destruirSessao(slot);
+  if (marcadores[slot]) { mapa.removeLayer(marcadores[slot]); marcadores[slot] = null; }
+  if (camadasOSM[slot]) { mapa.removeLayer(camadasOSM[slot]); camadasOSM[slot] = null; }
+  estado[slot.toLowerCase()] = null;
+  if (slotAtivo === slot) slotAtivo = null;
+  limparHighlights(slot);
+  resetSlotState(slot);
+  tokensTimer[slot]++;
+  recalcularModo();
+  renderEstado();
+  actualizarBotoesPlay();
+}
+
+// ---------------------------------------------------------------------
+//  SELECIONAR PONTO — chamado por clique no mapa, pesquisa ou par
+// ---------------------------------------------------------------------
+async function selecionarPonto(lat, lon, opts = {}) {
+  // decidir o slot
+  let slot = opts.slot;
+  if (!slot) {
+    if (estado.modo === 'vazio')      slot = 'A';
+    else if (estado.modo === 'single') slot = estado.a ? 'B' : 'A';
+    else {
+      // comparar: precisa de modal antes
+      abrirModalSubstituir(lat, lon, opts.eventoOriginal || null);
+      return;
+    }
+  }
+
+  // esconder dica do mapa
+  document.getElementById('mapa-dica')?.classList.add('escondida');
+  // fechar dropdown de pesquisa, se aberto
+  fecharResultadosProcura();
+
+  // limpar audio + camada OSM do slot
+  destruirSessao(slot);
+  if (slotAtivo === slot) slotAtivo = null;
+  limparHighlights(slot);
+  resetSlotState(slot);
+  tokensTimer[slot]++;
+  if (camadasOSM[slot]) {
+    mapa.removeLayer(camadasOSM[slot]);
+    camadasOSM[slot] = null;
+  }
+
+  // gravar entrada no estado
+  estado[slot.toLowerCase()] = {
+    lat, lon,
+    dados: null,
+    estadoMsg: 'A buscar dados do solo...',
+    carregando: true,
+  };
+
+  renderEstado();
+
+  // marcador
+  if (marcadores[slot]) mapa.removeLayer(marcadores[slot]);
+  marcadores[slot] = L.marker([lat, lon], { icon: criarIconeAB(slot) }).addTo(mapa);
+
+  // flyTo se a pesquisa pediu
+  if (opts.flyTo) {
+    mapa.flyTo([lat, lon], Math.max(mapa.getZoom(), 9), { duration: 1.0 });
+  }
+
+  // fetch
+  try {
+    const cfg = lerConfig();
+    const q = new URLSearchParams({
+      lat, lon,
+      dificuldade: cfg.dificuldade, duracao: cfg.duracao,
+      modo: cfg.electronico ? "electronico" : "acustico",
+      instrumentos: cfg.instrumentos.join(","),
+    });
+    const r = await fetch(`${API_URL}/gerar?${q.toString()}`);
     const dados = await r.json();
 
-    document.getElementById('estado').classList.remove('carregando');
-
     if (dados.erro) {
-      document.getElementById('estado').textContent =
-        dados.erro + (dados.dica ? ' — ' + dados.dica : '');
-      // painéis já foram limpos no início; nada mais a fazer
+      setEstadoMsg(slot, dados.erro + (dados.dica ? ' — ' + dados.dica : ''), false);
       return;
     }
 
-    renderSolo(dados.solo);
-    renderMusica(dados.musica);
-    renderPressaoHumana(dados.pressao_humana);
-    renderAvisos(dados.solo);
-    desenharPartitura(dados.melodia, dados.baixo);
+    estado[slot.toLowerCase()].dados = dados;
+    setEstadoMsg(slot, 'A tocar...', false);
+    renderEstado();
 
+    const duracao = await tocarNotas(slot, dados.melodia, dados.baixo, dados.musica.reverb_mix);
+    actualizarBotoesPlay();
 
-    document.getElementById('estado').textContent = 'A tocar...';
-    ultimasNotas = dados.notas;
-    document.getElementById('btn-tocar').disabled = false;
-
-    await tocarNotas(dados.melodia, dados.baixo, dados.musica.reverb_mix);
-
-    const duracaoTotal = dados.musica.duracao_seg;
+    const meuToken = ++tokensTimer[slot];
     setTimeout(() => {
-      document.getElementById('estado').textContent = 'Pronto. Clica noutro ponto ou repete.';
-    }, duracaoTotal * 1000);
+      if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
+        slotAtivo = null;
+        setEstadoMsg(slot, msgPronto(), false);
+        actualizarBotoesPlay();
+      }
+    }, duracao * 1000 + 250);
 
   } catch (err) {
-    document.getElementById('estado').classList.remove('carregando');
-    document.getElementById('estado').textContent = 'Erro: ' + err.message;
+    setEstadoMsg(slot, 'Erro: ' + err.message, false);
   }
+}
+
+// ---------------------------------------------------------------------
+//  MODAL POPOVER — Substituir A ou B?
+// ---------------------------------------------------------------------
+function abrirModalSubstituir(lat, lon, evento) {
+  fecharModalSubstituir();
+  const wrap = document.querySelector('.mapa-wrap');
+
+  const m = document.createElement('div');
+  m.className = 'popover-substituir';
+  m.id = 'popover-substituir';
+
+  // posicionar perto do clique ou centrado no mapa
+  if (evento && evento.containerPoint) {
+    const x = evento.containerPoint.x;
+    const y = evento.containerPoint.y;
+    const wrapRect = wrap.getBoundingClientRect();
+    const left = Math.min(wrapRect.width - 256, Math.max(8, x - 120));
+    const top  = Math.min(wrapRect.height - 170, Math.max(8, y + 16));
+    m.style.left = left + 'px';
+    m.style.top  = top + 'px';
+  } else {
+    m.style.left = '50%';
+    m.style.top  = '50%';
+    m.style.transform = 'translate(-50%, -50%)';
+  }
+
+  m.innerHTML = `
+    <div class="popover-titulo">Já tens A e B. Onde colocar este ponto?</div>
+    <div class="popover-coord">${lat.toFixed(3)}, ${lon.toFixed(3)}</div>
+    <div class="popover-botoes">
+      <button class="popover-btn popover-a" data-slot="A">Substituir A</button>
+      <button class="popover-btn popover-b" data-slot="B">Substituir B</button>
+    </div>
+    <button class="popover-cancelar">Cancelar</button>
+  `;
+  wrap.appendChild(m);
+
+  m.querySelectorAll('.popover-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const escolhido = b.dataset.slot;
+      fecharModalSubstituir();
+      selecionarPonto(lat, lon, { slot: escolhido });
+    });
+  });
+  m.querySelector('.popover-cancelar').addEventListener('click', fecharModalSubstituir);
+
+  // Esc fecha
+  const escHandler = (ev) => {
+    if (ev.key === 'Escape') { fecharModalSubstituir(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+}
+
+function fecharModalSubstituir() {
+  const m = document.getElementById('popover-substituir');
+  if (m) m.remove();
+}
+
+// ---------------------------------------------------------------------
+//  CLIQUE NO MAPA
+// ---------------------------------------------------------------------
+mapa.on('click', async (e) => {
+  const { lat, lng } = e.latlng;
+  await selecionarPonto(lat, lng, { eventoOriginal: e });
 });
 
-// ===== BOTÃO "Tocar de novo" =====
-document.getElementById('btn-tocar').addEventListener('click', () => {
-  if (ultimasNotas) {
-    tocarNotas(ultimasNotas.melodia, ultimasNotas.baixo,
-               sessao?.reverb?.wet?.value ?? 0.2);
+// ---------------------------------------------------------------------
+//  PESQUISA — Nominatim + parser de coordenadas + dropdown
+// ---------------------------------------------------------------------
+const inputProc      = document.getElementById('procurar-input');
+const resultadosProc = document.getElementById('procurar-resultados');
+const spinnerProc    = document.getElementById('proc-spinner');
+
+let timerDebounce = null;
+let indiceDestacado = -1;
+let resultadosActuais = [];
+
+// regex para "40.12, -8.45" ou "40,12 -8,45" — tolerante a vírgula decimal e separadores
+function parsearCoords(texto) {
+  const t = texto.trim();
+  // tentar primeiro com . como decimal:
+  let m = t.match(/^\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/);
+  if (m) {
+    return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
   }
+  // ou com vírgula como decimal (ex: "40,123 -8,456"):
+  m = t.match(/^\s*(-?\d{1,3},\d+)\s+(-?\d{1,3},\d+)\s*$/);
+  if (m) {
+    return { lat: parseFloat(m[1].replace(',', '.')), lon: parseFloat(m[2].replace(',', '.')) };
+  }
+  return null;
+}
+
+function fecharResultadosProcura() {
+  resultadosProc.hidden = true;
+  resultadosProc.innerHTML = '';
+  indiceDestacado = -1;
+  resultadosActuais = [];
+}
+
+function renderResultadosProcura(resultados) {
+  resultadosActuais = resultados;
+  indiceDestacado = -1;
+  if (resultados.length === 0) {
+    resultadosProc.innerHTML = '<div class="proc-vazio">Sem resultados.</div>';
+    resultadosProc.hidden = false;
+    return;
+  }
+  resultadosProc.innerHTML = resultados.map((r, i) => `
+    <div class="proc-item" data-i="${i}">
+      <span class="proc-item-nome">${r.nome}</span>
+      <span class="proc-item-coord">${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}</span>
+    </div>
+  `).join('');
+  resultadosProc.hidden = false;
+
+  resultadosProc.querySelectorAll('.proc-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const i = parseInt(el.dataset.i, 10);
+      selecionarResultadoProcura(i);
+    });
+  });
+}
+
+function selecionarResultadoProcura(i) {
+  const r = resultadosActuais[i];
+  if (!r) return;
+  inputProc.value = r.nome;
+  fecharResultadosProcura();
+  selecionarPonto(r.lat, r.lon, { flyTo: true });
+}
+
+async function chamarNominatim(query) {
+  // Em browser não conseguimos forçar User-Agent (header protegido),
+  // mas Nominatim aceita Referer automático. Adicionamos 'accept-language' para PT.
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&accept-language=pt`;
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error('Nominatim ' + r.status);
+  const dados = await r.json();
+  return dados.map(d => ({
+    nome: d.display_name,
+    lat: parseFloat(d.lat),
+    lon: parseFloat(d.lon),
+  }));
+}
+
+inputProc.addEventListener('input', () => {
+  const valor = inputProc.value;
+  clearTimeout(timerDebounce);
+
+  if (!valor.trim()) {
+    fecharResultadosProcura();
+    return;
+  }
+
+  // 1) tentar parsear como coordenadas
+  const coords = parsearCoords(valor);
+  if (coords) {
+    renderResultadosProcura([{
+      nome: `Coordenadas: ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`,
+      lat: coords.lat,
+      lon: coords.lon,
+    }]);
+    return;
+  }
+
+  // 2) caso contrário, Nominatim com debounce 300ms
+  spinnerProc.hidden = false;
+  timerDebounce = setTimeout(async () => {
+    try {
+      const res = await chamarNominatim(valor);
+      renderResultadosProcura(res);
+    } catch (e) {
+      resultadosProc.innerHTML = '<div class="proc-vazio">Erro: ' + e.message + '</div>';
+      resultadosProc.hidden = false;
+    } finally {
+      spinnerProc.hidden = true;
+    }
+  }, 300);
 });
+
+inputProc.addEventListener('keydown', (e) => {
+  if (resultadosProc.hidden) return;
+  const itens = resultadosProc.querySelectorAll('.proc-item');
+  if (itens.length === 0) {
+    if (e.key === 'Escape') fecharResultadosProcura();
+    return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    indiceDestacado = (indiceDestacado + 1) % itens.length;
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    indiceDestacado = (indiceDestacado - 1 + itens.length) % itens.length;
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const i = indiceDestacado >= 0 ? indiceDestacado : 0;
+    selecionarResultadoProcura(i);
+    return;
+  } else if (e.key === 'Escape') {
+    fecharResultadosProcura();
+    return;
+  } else {
+    return;
+  }
+  itens.forEach((it, i) => it.classList.toggle('destacado', i === indiceDestacado));
+  itens[indiceDestacado].scrollIntoView({ block: 'nearest' });
+});
+
+// fechar dropdown ao clicar fora
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.procurar')) fecharResultadosProcura();
+});
+
+// ---------------------------------------------------------------------
+//  PARES SUGERIDOS — render + handlers
+// ---------------------------------------------------------------------
+function renderParesSugeridos() {
+  const div = document.getElementById('pares-lista');
+  if (!div) return;
+
+  div.innerHTML = PARES_SUGERIDOS.map((par, i) => {
+    const a = par.intervencionado;
+    const b = par.pristino;
+    return `
+      <div class="par" data-par="${i}">
+        <button class="par-chip par-chip-interv"
+                data-lat="${a.lat}" data-lon="${a.lon}"
+                title="${a.porque}">${a.nome}</button>
+        <span class="par-vs">vs</span>
+        <button class="par-chip par-chip-prist"
+                data-lat="${b.lat}" data-lon="${b.lon}"
+                title="${b.porque}">${b.nome}</button>
+      </div>
+    `;
+  }).join('');
+
+  div.querySelectorAll('.par-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const lat = parseFloat(chip.dataset.lat);
+      const lon = parseFloat(chip.dataset.lon);
+      selecionarPonto(lat, lon, { flyTo: true });
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
+//  TOGGLE DE TEMA (claro / escuro)
+// ---------------------------------------------------------------------
+const ICONE_LUA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+const ICONE_SOL = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+
+function actualizarIconeTema() {
+  const btn = document.getElementById('toggle-tema');
+  if (!btn) return;
+  const ehEscuro = document.documentElement.getAttribute('data-tema') === 'escuro';
+  btn.innerHTML = ehEscuro ? ICONE_SOL : ICONE_LUA;
+  btn.title = ehEscuro ? 'Mudar para tema claro' : 'Mudar para tema escuro';
+}
+
+document.getElementById('toggle-tema')?.addEventListener('click', () => {
+  const ehEscuro = document.documentElement.getAttribute('data-tema') === 'escuro';
+  if (ehEscuro) {
+    document.documentElement.removeAttribute('data-tema');
+    try { localStorage.setItem('curiosoil-tema', 'claro'); } catch (_) {}
+  } else {
+    document.documentElement.setAttribute('data-tema', 'escuro');
+    try { localStorage.setItem('curiosoil-tema', 'escuro'); } catch (_) {}
+  }
+  actualizarIconeTema();
+});
+
+// ---------------------------------------------------------------------
+//  ARRANQUE
+// ---------------------------------------------------------------------
+actualizarIconeTema();
+renderParesSugeridos();
+montarControlos();
+renderEstado();   // pinta um shell vazio para a amostra A
