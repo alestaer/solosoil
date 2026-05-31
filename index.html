@@ -883,17 +883,33 @@
      DEFINIÇÕES + LEGENDA + EXPORTAÇÃO  (acrescentado)
      ============================================================ */
   .definicoes {
-    display: grid; grid-template-columns: 1.7fr 1fr 1fr; gap: var(--s-5);
-    align-items: start; background: var(--papel-claro); border: 1px solid var(--linha);
+    display: flex; flex-wrap: wrap; gap: var(--s-5);
+    align-items: flex-start; background: var(--papel-claro); border: 1px solid var(--linha);
     border-radius: var(--raio); padding: var(--s-4) var(--s-5);
     margin-bottom: var(--s-5); box-shadow: var(--sombra-sm); position: relative;
   }
-  @media (max-width: 860px) { .definicoes { grid-template-columns: 1fr; } }
+  .def-grupo { flex: 1 1 180px; min-width: 165px; }
+  .def-instr { flex: 2.4 1 330px; }
+  @media (max-width: 860px) { .def-grupo, .def-instr { flex: 1 1 100%; } }
   .def-rotulo { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .1em;
     color: var(--tinta-media); margin-bottom: var(--s-3); display: flex; align-items: center; gap: var(--s-2); }
   .def-hint { color: var(--tinta-leve); text-transform: none; letter-spacing: 0; font-size: var(--t-xs); }
   .chips { display: flex; flex-wrap: wrap; gap: var(--s-2); transition: opacity var(--transicao); }
-  .chips.desativado { opacity: .35; pointer-events: none; filter: grayscale(.6); }
+  .chips.desativado, #lista-instrumentos.desativado { opacity: .35; pointer-events: none; filter: grayscale(.6); }
+  /* famílias de instrumentos (revelação progressiva) */
+  .familias-barra { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-2); }
+  .familia-chip { font-family: var(--sans); font-size: var(--t-xs); text-transform: uppercase;
+    letter-spacing: .06em; padding: 4px 10px; border-radius: var(--raio-sm); border: 1px solid var(--linha);
+    background: var(--papel); color: var(--tinta-media); cursor: pointer; position: relative;
+    transition: all var(--transicao); }
+  .familia-chip:hover { border-color: var(--musgo); color: var(--tinta); }
+  .familia-chip.ativa { background: var(--papel-escuro); border-color: var(--musgo); color: var(--tinta); font-weight: 500; }
+  .familia-chip.com-selecao::after { content: ""; position: absolute; top: 3px; right: 3px;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--musgo); }
+  .familia-chip:focus-visible { outline: 2px solid var(--ocre); outline-offset: 2px; }
+  .familia-grupo { margin-bottom: var(--s-2); }
+  .instr-selecionados { font-size: var(--t-xs); color: var(--tinta-leve); margin-top: var(--s-1); min-height: 1.1em; }
+  .chip-estilo { /* herda .chip */ }
   .chip { font-family: var(--sans); font-size: var(--t-sm); padding: 5px 11px; border-radius: 999px;
     border: 1px solid var(--linha); background: var(--papel); color: var(--tinta-media);
     cursor: pointer; transition: all var(--transicao); }
@@ -995,13 +1011,17 @@
   <!-- ============== DEFINIÇÕES ============== -->
   <section class="definicoes">
     <div class="def-grupo def-instr">
-      <div class="def-rotulo">Instrumentos <span class="def-hint">(até 3)</span></div>
-      <div class="chips" id="lista-instrumentos"></div>
+      <div class="def-rotulo">Instrumentos <span class="def-hint">(até 3 · escolhe a família)</span></div>
+      <div id="lista-instrumentos"></div>
       <label class="interruptor">
         <input type="checkbox" id="modo-eletronico">
         <span class="pega"></span>
         <span>Modo eletrónico — paisagem sonora</span>
       </label>
+    </div>
+    <div class="def-grupo">
+      <div class="def-rotulo">Estilo <span class="def-hint">(aproximado)</span></div>
+      <div class="chips" id="lista-estilos"></div>
     </div>
     <div class="def-grupo">
       <div class="def-rotulo">Dificuldade</div>

@@ -4,7 +4,11 @@
 //  Features: comparação A/B + pesquisa de localização + pares curados
 // =====================================================================
 
-const API_URL = "https://solosoil.onrender.com";
+// Em testes locais (localhost) fala com o backend local (python servidor.py -> :5000).
+// Em produção continua a apontar para o backend no Render.
+const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname)
+  ? `${location.protocol}//${location.hostname}:5000`
+  : 'https://solosoil.onrender.com';
 
 // ---------------------------------------------------------------------
 //  DEFINIÇÕES GLOBAIS — instrumentos, dificuldade, duração, modo
@@ -44,45 +48,185 @@ function toggleChipInstrumento(b) {
 
 async function montarControlos() {
   const cont = document.getElementById("lista-instrumentos");
-  if (!cont) return;
-  let lista = INSTRUMENTOS_FALLBACK;
+  let familias = null, estilos = null, listaFlat = INSTRUMENTOS_FALLBACK;
   try {
     const r = await fetch(`${API_URL}/instrumentos`);
     const d = await r.json();
-    if (d && Array.isArray(d.instrumentos) && d.instrumentos.length) lista = d.instrumentos;
+    if (d && Array.isArray(d.instrumentos) && d.instrumentos.length) listaFlat = d.instrumentos;
+    if (d && Array.isArray(d.familias) && d.familias.length) familias = d.familias;
+    if (d && Array.isArray(d.estilos) && d.estilos.length) estilos = d.estilos;
   } catch (_) { /* usa fallback */ }
-  NOMES_INSTR = Object.fromEntries(lista.map((i) => [i.id, i.nome]));
-  cont.innerHTML = "";
-  lista.forEach(({ id, nome }) => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "chip" + (id === "piano" ? " ativo" : "");
-    b.dataset.id = id; b.textContent = nome;
-    b.setAttribute("aria-pressed", id === "piano" ? "true" : "false");
-    b.setAttribute("aria-label", "Instrumento: " + nome);
-    b.addEventListener("click", () => toggleChipInstrumento(b));
-    cont.appendChild(b);
+  NOMES_INSTR = Object.fromEntries(listaFlat.map((i) => [i.id, i.nome]));
+
+  // ---- instrumentos por família (revelação progressiva) ----
+  if (cont) {
+    if (!familias) {
+      familias = [{ id: "todos", nome: "Instrumentos",
+                    instrumentos: listaFlat.map((i) => ({ id: i.id, nome: i.nome })) }];
+    }
+    montarInstrumentos(cont, familias);
+  }
+
+  // ---- estilos ----
+  montarEstilos(estilos || [{ id: "livre", nome: "Livre" }]);
+
+  // ---- modo eletrónico ----
+  const tog = document.getElementById("modo-eletronico");
+  if (tog && cont) tog.addEventListener("change", (e) => {
+    cont.classList.toggle("desativado", e.target.checked);
+    agendarRegeneracao();
   });
 
-  const tog = document.getElementById("modo-eletronico");
-  if (tog) tog.addEventListener("change", (e) =>
-    cont.classList.toggle("desativado", e.target.checked));
+  // ---- dificuldade -> atualização automática ----
+  document.querySelectorAll('input[name="dificuldade"]').forEach((r) =>
+    r.addEventListener("change", agendarRegeneracao));
 
+  // ---- duração ----
   const dur = document.getElementById("duracao");
   const lbl = document.getElementById("duracao-label");
   if (dur && lbl) {
     const ref = () => lbl.textContent = fmtTempo(dur.value) + (dur.value >= 273 ? "  (4′33″)" : "");
-    dur.addEventListener("input", ref); ref();
+    dur.addEventListener("input", () => { ref(); agendarRegeneracao(); });
+    ref();
   }
+}
+
+function montarInstrumentos(cont, familias) {
+  cont.innerHTML = "";
+  const barra = document.createElement("div"); barra.className = "familias-barra";
+  const grupos = document.createElement("div"); grupos.className = "familia-grupos";
+  const resumo = document.createElement("div"); resumo.className = "instr-selecionados"; resumo.id = "instr-selecionados";
+
+  familias.forEach((fam) => {
+    const fb = document.createElement("button");
+    fb.type = "button"; fb.className = "familia-chip"; fb.dataset.fam = fam.id;
+    fb.textContent = fam.nome;
+    fb.setAttribute("aria-label", "Família: " + fam.nome);
+    fb.addEventListener("click", () => abrirFamilia(fam.id));
+    barra.appendChild(fb);
+
+    const g = document.createElement("div");
+    g.className = "familia-grupo chips"; g.dataset.fam = fam.id; g.hidden = true;
+    (fam.instrumentos || []).forEach(({ id, nome }) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "chip" + (id === "piano" ? " ativo" : "");
+      b.dataset.id = id; b.textContent = nome;
+      b.setAttribute("aria-pressed", id === "piano" ? "true" : "false");
+      b.setAttribute("aria-label", "Instrumento: " + nome);
+      b.addEventListener("click", () => {
+        toggleChipInstrumento(b); atualizarResumoInstrumentos(); agendarRegeneracao();
+      });
+      g.appendChild(b);
+    });
+    grupos.appendChild(g);
+  });
+
+  cont.appendChild(barra); cont.appendChild(grupos); cont.appendChild(resumo);
+  const famPiano = familias.find((f) => (f.instrumentos || []).some((i) => i.id === "piano"));
+  abrirFamilia(famPiano ? famPiano.id : familias[0].id);
+  atualizarResumoInstrumentos();
+}
+
+function abrirFamilia(famId) {
+  document.querySelectorAll("#lista-instrumentos .familia-chip").forEach((c) =>
+    c.classList.toggle("ativa", c.dataset.fam === famId));
+  document.querySelectorAll("#lista-instrumentos .familia-grupo").forEach((g) =>
+    g.hidden = (g.dataset.fam !== famId));
+}
+
+function atualizarResumoInstrumentos() {
+  const resumo = document.getElementById("instr-selecionados");
+  const ativos = [...document.querySelectorAll("#lista-instrumentos .chip.ativo")].map((c) => c.dataset.id);
+  if (resumo) {
+    resumo.textContent = ativos.length
+      ? "Escolhidos: " + ativos.map((id) => NOMES_INSTR[id] || id).join(", ")
+      : "";
+  }
+  document.querySelectorAll("#lista-instrumentos .familia-chip").forEach((fc) => {
+    const temSel = document.querySelector(
+      `#lista-instrumentos .familia-grupo[data-fam="${fc.dataset.fam}"] .chip.ativo`) != null;
+    fc.classList.toggle("com-selecao", temSel);
+  });
+}
+
+function montarEstilos(estilos) {
+  const cont = document.getElementById("lista-estilos");
+  if (!cont) return;
+  cont.innerHTML = "";
+  estilos.forEach(({ id, nome }) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip chip-estilo" + (id === "livre" ? " ativo" : "");
+    b.dataset.estilo = id; b.textContent = nome;
+    b.setAttribute("aria-pressed", id === "livre" ? "true" : "false");
+    b.setAttribute("aria-label", "Estilo: " + nome);
+    b.addEventListener("click", () => {
+      cont.querySelectorAll(".chip-estilo").forEach((c) => {
+        c.classList.remove("ativo"); c.setAttribute("aria-pressed", "false");
+      });
+      b.classList.add("ativo"); b.setAttribute("aria-pressed", "true");
+      agendarRegeneracao();
+    });
+    cont.appendChild(b);
+  });
 }
 
 function lerConfig() {
   const electronico = !!document.getElementById("modo-eletronico")?.checked;
   const dificuldade = (document.querySelector('input[name="dificuldade"]:checked') || {}).value || "intermedio";
   const duracao = parseInt(document.getElementById("duracao")?.value, 10) || 75;
+  const estiloEl = document.querySelector("#lista-estilos .chip-estilo.ativo");
+  const estilo = estiloEl ? estiloEl.dataset.estilo : "livre";
   const ativos = [...document.querySelectorAll("#lista-instrumentos .chip.ativo")].map((c) => c.dataset.id);
   const instrumentos = electronico ? ["piano", "violoncelo", "contrabaixo"]
                                     : (ativos.length ? ativos : ["piano"]);
-  return { electronico, dificuldade, duracao, instrumentos };
+  return { electronico, dificuldade, duracao, estilo, instrumentos };
+}
+
+// Atualização automática: ao mudar qualquer definição, regenera as amostras
+// já colocadas no mapa (usa as coordenadas guardadas em estado.a/estado.b).
+// Debounce para não disparar a cada arrasto do cursor de duração.
+let regenTimer = null;
+function agendarRegeneracao() {
+  clearTimeout(regenTimer);
+  regenTimer = setTimeout(() => {
+    ['A', 'B'].forEach((slot) => {
+      const s = estado[slot.toLowerCase()];
+      if (s && s.lat != null && s.lon != null) regenerarSlot(slot);
+    });
+  }, 450);
+}
+
+async function regenerarSlot(slot) {
+  const s = estado[slot.toLowerCase()];
+  if (!s || s.lat == null) return;
+  // o áudio que estava a tocar ficou desatualizado: para-o (sem auto-tocar o novo)
+  destruirSessao(slot);
+  if (slotAtivo === slot) slotAtivo = null;
+  limparHighlights(slot);
+  resetSlotState(slot);
+  s.carregando = true; s.estadoMsg = 'A actualizar a peça...';
+  renderEstado();
+  try {
+    const cfg = lerConfig();
+    const q = new URLSearchParams({
+      lat: s.lat, lon: s.lon,
+      dificuldade: cfg.dificuldade, duracao: cfg.duracao,
+      modo: cfg.electronico ? "electronico" : "acustico",
+      estilo: cfg.estilo,
+      instrumentos: cfg.instrumentos.join(","),
+    });
+    const r = await fetch(`${API_URL}/gerar?${q.toString()}`);
+    const dados = await r.json();
+    if (dados.erro) { s.carregando = false; setEstadoMsg(slot, dados.erro, false); return; }
+    s.dados = dados; s.carregando = false;
+    setEstadoMsg(slot, msgPronto(), false);
+    renderEstado();
+    actualizarBotoesPlay();
+  } catch (err) {
+    s.carregando = false;
+    setEstadoMsg(slot, 'Erro ao actualizar: ' + err.message, false);
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -583,6 +727,7 @@ function renderMusica(slot, m) {
   if (!div) return;
   const linhas = [
     ['Tonalidade',     m.tonalidade || m.escala || '—'],
+    ['Estilo',         m.estilo_nome || '—'],
     ['Compasso',       m.compasso || '—'],
     ['Andamento',      (m.bpm ?? '—') + ' BPM'],
     ['Dificuldade',    m.dificuldade || '—'],
@@ -736,6 +881,8 @@ function desenharPartitura(slot, dados) {
 
   const elsMel = [], timingsMel = [];
   const idxMelodia = Math.max(0, partes.findIndex(p => p.papel === 'melodia'));
+  // grand staff (piano): partes que partilham o mesmo grupo_grand -> chaveta
+  const ehGrand = nV >= 2 && partes.every(p => p.grupo_grand && p.grupo_grand === partes[0].grupo_grand);
 
   for (let m = 0; m < maxComp; m++) {
     const row = Math.floor(m / perRow), col = m % perRow;
@@ -779,8 +926,14 @@ function desenharPartitura(slot, dados) {
 
     if (primeira && nV > 1) {
       try {
-        const conn = new VF.StaveConnector(pautas[0], pautas[nV - 1]);
-        conn.setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw();
+        const tipo = ehGrand ? VF.StaveConnector.type.BRACE
+                             : VF.StaveConnector.type.SINGLE_LEFT;
+        new VF.StaveConnector(pautas[0], pautas[nV - 1])
+          .setType(tipo).setContext(ctx).draw();
+        if (ehGrand) {
+          new VF.StaveConnector(pautas[0], pautas[nV - 1])
+            .setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw();
+        }
       } catch (_) {}
     }
   }
@@ -1128,6 +1281,7 @@ async function selecionarPonto(lat, lon, opts = {}) {
       lat, lon,
       dificuldade: cfg.dificuldade, duracao: cfg.duracao,
       modo: cfg.electronico ? "electronico" : "acustico",
+      estilo: cfg.estilo,
       instrumentos: cfg.instrumentos.join(","),
     });
     const r = await fetch(`${API_URL}/gerar?${q.toString()}`);
