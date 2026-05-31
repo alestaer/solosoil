@@ -401,29 +401,48 @@ FAMILIAS = [
 PAPEIS_CLAVE = {"melodia": "treble", "harmonia": "treble", "baixo": "bass"}
 
 
+_TECLAS_GRAND = ("piano", "harpa", "celesta")
+
+
 def atribuir_papeis(ids_instr, estilo="livre"):
-    """Distribui até 3 instrumentos por papéis. O piano a solo recebe um
-    grand staff (duas pautas: mão direita = melodia, mão esquerda = baixo)."""
+    """Distribui até 3 instrumentos por papéis. Um teclado (piano/harpa/celesta)
+    recebe SEMPRE um grand staff (mão direita + mão esquerda). Quando há outro
+    instrumento melódico, este fica com a melodia e o teclado acompanha."""
     ids = [i for i in ids_instr if i in INSTRUMENTOS][:3]
     if not ids:
         ids = ["piano"]
-    if len(ids) == 1 and ids[0] in ("piano", "harpa", "celesta"):
+
+    kbd = next((i for i in ids if i in _TECLAS_GRAND), None)
+
+    if kbd is None:
+        if len(ids) == 1:
+            return [{"papel": "melodia", "instrumento": ids[0], "clef": "treble", "grupo": None, "staff": None}]
+        if len(ids) == 2:
+            return [
+                {"papel": "melodia", "instrumento": ids[0], "clef": "treble", "grupo": None, "staff": None},
+                {"papel": "baixo",   "instrumento": ids[1], "clef": "bass",   "grupo": None, "staff": None},
+            ]
         return [
-            {"papel": "melodia", "instrumento": ids[0], "clef": "treble", "grupo": "g1", "staff": 1},
-            {"papel": "baixo",   "instrumento": ids[0], "clef": "bass",   "grupo": "g1", "staff": 2},
+            {"papel": "melodia",  "instrumento": ids[0], "clef": "treble", "grupo": None, "staff": None},
+            {"papel": "harmonia", "instrumento": ids[1], "clef": "treble", "grupo": None, "staff": None},
+            {"papel": "baixo",    "instrumento": ids[2], "clef": "bass",   "grupo": None, "staff": None},
         ]
-    if len(ids) == 1:
-        return [{"papel": "melodia", "instrumento": ids[0], "clef": "treble", "grupo": None, "staff": None}]
-    if len(ids) == 2:
-        return [
-            {"papel": "melodia", "instrumento": ids[0], "clef": "treble", "grupo": None, "staff": None},
-            {"papel": "baixo",   "instrumento": ids[1], "clef": "bass",   "grupo": None, "staff": None},
-        ]
-    return [
-        {"papel": "melodia",  "instrumento": ids[0], "clef": "treble", "grupo": None, "staff": None},
-        {"papel": "harmonia", "instrumento": ids[1], "clef": "treble", "grupo": None, "staff": None},
-        {"papel": "baixo",    "instrumento": ids[2], "clef": "bass",   "grupo": None, "staff": None},
+
+    # teclado presente -> grand staff (g1: mão direita = staff 1, esquerda = staff 2)
+    outros = [i for i in ids if i != kbd][:2]
+    extra = []
+    if not outros:
+        rh_papel = "melodia"          # teclado a solo: melodia em cima, baixo em baixo
+    else:
+        rh_papel = "harmonia"         # teclado acompanha; outro(s) levam melodia/baixo
+        extra.append({"papel": "melodia", "instrumento": outros[0], "clef": "treble", "grupo": None, "staff": None})
+        if len(outros) == 2:
+            extra.append({"papel": "baixo", "instrumento": outros[1], "clef": "bass", "grupo": None, "staff": None})
+    grand = [
+        {"papel": rh_papel, "instrumento": kbd, "clef": "treble", "grupo": "g1", "staff": 1},
+        {"papel": "baixo",  "instrumento": kbd, "clef": "bass",   "grupo": "g1", "staff": 2},
     ]
+    return extra + grand
 
 
 # ============================================================

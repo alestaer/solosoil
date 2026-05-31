@@ -10,6 +10,23 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
   ? `${location.protocol}//${location.hostname}:5000`
   : 'https://solosoil.onrender.com';
 
+// O backend no Render (plano gratuito) adormece; a 1ª chamada pode dar 502.
+// Esta função repete algumas vezes, avisando que está "a acordar o servidor".
+async function gerarFetch(url, slot, tentativas = 4) {
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const r = await fetch(url);
+      if ([502, 503, 504].includes(r.status)) throw new Error('servidor a acordar (' + r.status + ')');
+      return await r.json();
+    } catch (e) {
+      if (i >= tentativas - 1) throw e;
+      if (slot) setEstadoMsg(slot, 'A acordar o servidor… (até ~1 min na 1ª vez)', true);
+      await new Promise((res) => setTimeout(res, 2500 * (i + 1)));
+    }
+  }
+  throw new Error('sem resposta do servidor');
+}
+
 // ---------------------------------------------------------------------
 //  DEFINIÇÕES GLOBAIS — instrumentos, dificuldade, duração, modo
 //  (afectam a partitura e as exportações; a pré-escuta A/B é a piano)
@@ -22,6 +39,19 @@ const INSTRUMENTOS_FALLBACK = [
   { id: "guitarra", nome: "Guitarra" }, { id: "contrabaixo", nome: "Contrabaixo" },
 ];
 let NOMES_INSTR = Object.fromEntries(INSTRUMENTOS_FALLBACK.map((i) => [i.id, i.nome]));
+
+// Família de cada instrumento — usada para escolher o TIMBRE na pré-escuta.
+// Atualizada a partir de /instrumentos; este mapa é só o recuo (offline).
+let FAMILIA_DE = {
+  piano: 'teclas', celesta: 'teclas',
+  violino: 'cordas', viola: 'cordas', violoncelo: 'cordas',
+  contrabaixo: 'cordas', harpa: 'cordas', guitarra: 'cordas',
+  flauta: 'madeiras', flautim: 'madeiras', oboe: 'madeiras',
+  clarinete: 'madeiras', fagote: 'madeiras',
+  trompete: 'metais', trompa: 'metais', trombone: 'metais', tuba: 'metais',
+  marimba: 'percussao', vibrafone: 'percussao', xilofone: 'percussao', glockenspiel: 'percussao',
+};
+const familiaDeInstrumento = (id) => FAMILIA_DE[id] || 'teclas';
 
 const fmtTempo = (s) => { s = Math.round(+s); return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`; };
 
@@ -57,6 +87,7 @@ async function montarControlos() {
     if (d && Array.isArray(d.estilos) && d.estilos.length) estilos = d.estilos;
   } catch (_) { /* usa fallback */ }
   NOMES_INSTR = Object.fromEntries(listaFlat.map((i) => [i.id, i.nome]));
+  listaFlat.forEach((i) => { if (i.familia) FAMILIA_DE[i.id] = i.familia; });
 
   // ---- instrumentos por família (revelação progressiva) ----
   if (cont) {
@@ -216,8 +247,7 @@ async function regenerarSlot(slot) {
       estilo: cfg.estilo,
       instrumentos: cfg.instrumentos.join(","),
     });
-    const r = await fetch(`${API_URL}/gerar?${q.toString()}`);
-    const dados = await r.json();
+    const dados = await gerarFetch(`${API_URL}/gerar?${q.toString()}`, slot);
     if (dados.erro) { s.carregando = false; setEstadoMsg(slot, dados.erro, false); return; }
     s.dados = dados; s.carregando = false;
     setEstadoMsg(slot, msgPronto(), false);
@@ -338,12 +368,12 @@ let toneIniciado = false;          // Tone.start() só pode ser chamado uma vez 
 
 // Estado de pausa independente por slot (não partilha o AudioContext global)
 const slotState = {
-  A: { pausado: false, melodia: [], baixo: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 },
-  B: { pausado: false, melodia: [], baixo: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 },
+  A: { pausado: false, notas: [], reverbMix: 0.2, electronico: false, tStart: 0, tPausa: 0, duracaoTotal: 0 },
+  B: { pausado: false, notas: [], reverbMix: 0.2, electronico: false, tStart: 0, tPausa: 0, duracaoTotal: 0 },
 };
 
 function resetSlotState(slot) {
-  slotState[slot] = { pausado: false, melodia: [], baixo: [], reverbMix: 0.2, tStart: 0, tPausa: 0, duracaoTotal: 0 };
+  slotState[slot] = { pausado: false, notas: [], reverbMix: 0.2, electronico: false, tStart: 0, tPausa: 0, duracaoTotal: 0 };
 }
 
 // Timing e elementos SVG das notas de cada slot (para highlight sincronizado)
@@ -403,18 +433,93 @@ async function garantirToneIniciado() {
   }
 }
 
-function criarSessao(reverbMix = 0.2) {
-  const saida  = new Tone.Gain(1).toDestination();
-  const reverb = new Tone.Reverb({ decay: 3.5, wet: reverbMix }).connect(saida);
-  const piano  = new Tone.Sampler({
-    urls: {
-      A2: "A2.mp3", A3: "A3.mp3", A4: "A4.mp3", A5: "A5.mp3",
-      C3: "C3.mp3", C4: "C4.mp3", C5: "C5.mp3",
-    },
-    release: 1.5,
-    baseUrl: "https://tonejs.github.io/audio/salamander/",
-  }).connect(reverb);
-  return { piano, reverb, saida };
+// Amostras de piano (Salamander) — timbre realista para a família "teclas".
+const SALAMANDER = {
+  urls: { A2: "A2.mp3", A3: "A3.mp3", A4: "A4.mp3", A5: "A5.mp3",
+          C3: "C3.mp3", C4: "C4.mp3", C5: "C5.mp3" },
+  release: 1.2, baseUrl: "https://tonejs.github.io/audio/salamander/",
+};
+
+// Cria uma voz Tone para uma família de instrumentos. Em modo eletrónico,
+// usa timbres mais ricos. Robusto: se algo falhar, recua para um sintetizador
+// simples (a reprodução nunca parte por causa de uma voz).
+function criarVozFamilia(familia, electronico, destino) {
+  let v;
+  try {
+    if (electronico) {
+      if (familia === 'cordas' || familia === 'teclas') {
+        v = new Tone.PolySynth(Tone.Synth);
+        v.set({ oscillator: { type: 'fatsawtooth', spread: 28, count: 3 },
+                envelope: { attack: 0.6, decay: 0.5, sustain: 0.8, release: 3.2 } });
+        v.volume.value = -16;
+      } else if (familia === 'metais') {
+        v = new Tone.PolySynth(Tone.Synth);
+        v.set({ oscillator: { type: 'sawtooth' },
+                envelope: { attack: 0.05, decay: 0.3, sustain: 0.6, release: 1.2 } });
+        v.volume.value = -14;
+      } else {
+        v = new Tone.PolySynth(Tone.Synth);
+        v.set({ oscillator: { type: 'triangle' },
+                envelope: { attack: 0.02, decay: 0.4, sustain: 0.5, release: 1.6 } });
+        v.volume.value = -10;
+      }
+    } else if (familia === 'teclas') {
+      v = new Tone.Sampler(SALAMANDER);
+    } else if (familia === 'cordas') {           // arco: ataque suave, cauda longa
+      v = new Tone.PolySynth(Tone.Synth);
+      v.set({ oscillator: { type: 'sawtooth' },
+              envelope: { attack: 0.22, decay: 0.3, sustain: 0.85, release: 1.7 } });
+      v.volume.value = -13;
+    } else if (familia === 'madeiras') {         // sopro: ar, doce
+      v = new Tone.PolySynth(Tone.Synth);
+      v.set({ oscillator: { type: 'triangle' },
+              envelope: { attack: 0.06, decay: 0.2, sustain: 0.75, release: 0.9 } });
+      v.volume.value = -8;
+    } else if (familia === 'metais') {           // metal: ataque firme, brilho
+      v = new Tone.PolySynth(Tone.Synth);
+      v.set({ oscillator: { type: 'sawtooth' },
+              envelope: { attack: 0.04, decay: 0.2, sustain: 0.7, release: 0.7 } });
+      v.volume.value = -14;
+    } else if (familia === 'percussao') {        // lâminas: ataque seco, sem sustain
+      v = new Tone.PolySynth(Tone.Synth);
+      v.set({ oscillator: { type: 'triangle' },
+              envelope: { attack: 0.004, decay: 0.6, sustain: 0.0, release: 0.5 } });
+      v.volume.value = -6;
+    } else {
+      v = new Tone.PolySynth(Tone.Synth); v.volume.value = -8;
+    }
+  } catch (_) {
+    try { v = new Tone.PolySynth(Tone.Synth); } catch (__) { v = null; }
+  }
+  if (v && destino) { try { v.connect(destino); } catch (_) {} }
+  return v;
+}
+
+function criarSessao(reverbMix = 0.2, electronico = false) {
+  const saida = new Tone.Gain(1).toDestination();
+  const reverb = new Tone.Reverb({ decay: electronico ? 5.5 : 3.5, wet: reverbMix }).connect(saida);
+  let entrada = reverb;
+  let delay = null;
+  if (electronico) {
+    delay = new Tone.FeedbackDelay({ delayTime: 0.38, feedback: 0.3, wet: 0.22 }).connect(reverb);
+    entrada = delay;
+  }
+  return { vozes: {}, reverb, saida, entrada, delay, electronico };
+}
+
+// devolve (criando se preciso) a voz da família, ligada à cadeia da sessão
+function vozDaSessao(sess, familia) {
+  if (!sess.vozes[familia]) {
+    sess.vozes[familia] = criarVozFamilia(familia, sess.electronico, sess.entrada);
+  }
+  return sess.vozes[familia];
+}
+
+function libertarVozes(sess) {
+  if (!sess) return;
+  Object.values(sess.vozes || {}).forEach(v => {
+    try { v.releaseAll ? v.releaseAll() : (v.triggerRelease && v.triggerRelease()); } catch (_) {}
+  });
 }
 
 function destruirSessao(slot) {
@@ -422,11 +527,12 @@ function destruirSessao(slot) {
   if (!s) return;
   try { s.saida.gain.cancelScheduledValues(0); } catch (_) {}
   try { s.saida.gain.setValueAtTime(0, Tone.now()); } catch (_) {}
-  try { s.piano.releaseAll(); } catch (_) {}
+  libertarVozes(s);
   setTimeout(() => {
-    try { s.piano.dispose();  } catch (_) {}
+    Object.values(s.vozes || {}).forEach(v => { try { v.dispose(); } catch (_) {} });
+    try { s.delay && s.delay.dispose(); } catch (_) {}
     try { s.reverb.dispose(); } catch (_) {}
-    try { s.saida.dispose();  } catch (_) {}
+    try { s.saida.dispose(); } catch (_) {}
   }, 90);
   sessoes[slot] = null;
 }
@@ -436,20 +542,17 @@ function silenciarOutras(slotActual) {
     if (outro === slotActual) return;
     const s = sessoes[outro];
     if (!s) return;
-    // fade-out do gain (~80ms)
     try {
       const t = Tone.now();
       s.saida.gain.cancelScheduledValues(t);
       s.saida.gain.setTargetAtTime(0, t, 0.08);
     } catch (_) {}
-    try { s.piano.releaseAll(); } catch (_) {}
-    // só marcar como "pausado" se estava efectivamente a tocar
+    libertarVozes(s);
     if (slotAtivo === outro) {
       slotState[outro].pausado = true;
       slotState[outro].tPausa = Tone.now();
-      tokensTimer[outro]++;   // invalida o timer de fim pendente
+      tokensTimer[outro]++;
       slotAtivo = null;
-      // Cancela timers futuros mas mantém o highlight na última nota tocada
       highlightTimers[outro].forEach(id => clearTimeout(id));
       highlightTimers[outro] = [];
       setEstadoMsg(outro, 'Pausado.', false);
@@ -457,33 +560,64 @@ function silenciarOutras(slotActual) {
   });
 }
 
-// Toca notas num slot. Silencia o outro, agenda as notas, guarda estado por slot.
-// Devolve a duração total (segundos).
-async function tocarNotas(slot, melodia, baixo, reverbMix = 0.2) {
+// Constrói a lista de notas a tocar a partir das PARTES (cada nota leva a sua
+// família, para escolher o timbre). Expande acordes em notas separadas.
+function notasDeDados(dados) {
+  const out = [];
+  ((dados && dados.partes) || []).forEach(parte => {
+    const fam = familiaDeInstrumento(parte.instrumento);
+    (parte.compassos || []).forEach(comp => comp.forEach(ev => {
+      if (ev.is_rest) return;
+      out.push({ nota: ev.nome, inicio: ev.inicio_seg, duracao: ev.duracao_seg,
+                 velocity: ev.velocity, familia: fam });
+      (ev.acorde || []).forEach(a => out.push({
+        nota: midiNome(a.midi), inicio: ev.inicio_seg, duracao: ev.duracao_seg,
+        velocity: ev.velocity, familia: fam,
+      }));
+    }));
+  });
+  return out;
+}
+
+// Agenda uma lista de notas (cada uma com .familia) na sessão, a partir de
+// tBase, descontando `elapsed` (para retoma). Devolve a duração restante.
+function agendarNotas(sess, notas, tBase, elapsed = 0) {
+  let dur = 0;
+  notas.forEach(n => {
+    const ini = n.inicio - elapsed;
+    if (ini < -0.02) return;
+    const voz = vozDaSessao(sess, n.familia);
+    if (!voz) return;
+    try { voz.triggerAttackRelease(n.nota, Math.max(0.06, n.duracao), tBase + Math.max(0, ini), n.velocity); } catch (_) {}
+    dur = Math.max(dur, Math.max(0, ini) + n.duracao);
+  });
+  return dur;
+}
+
+// Toca um slot (multi-instrumento). Silencia o outro, agenda por família,
+// guarda estado por slot. Devolve a duração total (segundos).
+async function tocarNotas(slot, notas, reverbMix = 0.2, electronico = false) {
   await garantirToneIniciado();
   silenciarOutras(slot);
 
-  if (!sessoes[slot]) sessoes[slot] = criarSessao(reverbMix);
+  if (!sessoes[slot]) sessoes[slot] = criarSessao(reverbMix, electronico);
   const sess = sessoes[slot];
-  try { sess.piano.releaseAll(); } catch (_) {}
+  libertarVozes(sess);
   try {
     const t = Tone.now();
     sess.saida.gain.cancelScheduledValues(t);
     sess.saida.gain.setTargetAtTime(1, t, 0.02);
   } catch (_) {}
-  try {
-    sess.reverb.wet.setTargetAtTime(reverbMix, Tone.now(), 0.02);
-  } catch (_) {}
+  try { sess.reverb.wet.setTargetAtTime(reverbMix, Tone.now(), 0.02); } catch (_) {}
 
+  // Pré-cria as vozes das famílias presentes ANTES de esperar pelos samples,
+  // para que Tone.loaded() aguarde também os samples do piano.
+  [...new Set(notas.map(n => n.familia))].forEach(f => vozDaSessao(sess, f));
   await Tone.loaded();
   const tStart = Tone.now() + 0.15;
-  const todasNotas = melodia.concat(baixo || []);
-  const duracaoTotal = todasNotas.reduce((acc, n) => Math.max(acc, n.inicio + n.duracao), 0);
-  todasNotas.forEach(n => {
-    sess.piano.triggerAttackRelease(n.nota, n.duracao, tStart + n.inicio, n.velocity);
-  });
+  const duracaoTotal = agendarNotas(sess, notas, tStart, 0);
 
-  slotState[slot] = { pausado: false, melodia, baixo: baixo || [], reverbMix, tStart, tPausa: 0, duracaoTotal };
+  slotState[slot] = { pausado: false, notas, reverbMix, electronico, tStart, tPausa: 0, duracaoTotal };
   slotAtivo = slot;
   agendarHighlights(slot, 0);
   return duracaoTotal;
@@ -509,7 +643,7 @@ async function pressionaPlay(slot) {
         sess.saida.gain.cancelScheduledValues(t);
         sess.saida.gain.setValueAtTime(0, t);   // mute imediato
       } catch (_) {}
-      try { sess.piano.releaseAll(); } catch (_) {}
+      libertarVozes(sess);
     }
     st.pausado = true;
     st.tPausa = Tone.now();
@@ -524,14 +658,12 @@ async function pressionaPlay(slot) {
   }
 
   // --- (2) Slot pausado → retomar ---
-  if (st.pausado && (st.melodia.length > 0 || st.baixo.length > 0)) {
+  if (st.pausado && (st.notas || []).length > 0) {
     const elapsed = st.tPausa - st.tStart;
-    const todasNotas = st.melodia.concat(st.baixo);
-    const notasRestantes = todasNotas.filter(n => n.inicio > elapsed);
+    const notasRestantes = st.notas.filter(n => n.inicio > elapsed - 0.02);
 
     if (notasRestantes.length > 0) {
-      // Re-agendar notas que ainda não tinham tocado
-      if (!sessoes[slot]) sessoes[slot] = criarSessao(st.reverbMix);
+      if (!sessoes[slot]) sessoes[slot] = criarSessao(st.reverbMix, st.electronico);
       const sess = sessoes[slot];
       silenciarOutras(slot);
       try {
@@ -539,17 +671,10 @@ async function pressionaPlay(slot) {
         sess.saida.gain.cancelScheduledValues(t);
         sess.saida.gain.setTargetAtTime(1, t, 0.02);
       } catch (_) {}
+      [...new Set(notasRestantes.map(n => n.familia))].forEach(f => vozDaSessao(sess, f));
       await Tone.loaded();
       const tNewStart = Tone.now() + 0.15;
-      notasRestantes.forEach(n => {
-        sess.piano.triggerAttackRelease(
-          n.nota, n.duracao, tNewStart + (n.inicio - elapsed), n.velocity
-        );
-      });
-      const novaDuracao = notasRestantes.reduce(
-        (acc, n) => Math.max(acc, (n.inicio - elapsed) + n.duracao), 0
-      );
-      // actualizar estado para futuras pausas nesta sessão
+      const novaDuracao = agendarNotas(sess, notasRestantes, tNewStart, elapsed);
       st.pausado = false;
       st.tStart  = tNewStart - elapsed;  // base equivalente para re-pausar correctamente
       st.tPausa  = 0;
@@ -570,7 +695,7 @@ async function pressionaPlay(slot) {
       // Todas as notas já passaram — recomeçar do início
       st.pausado = false;
       setEstadoMsg(slot, 'A tocar...', false);
-      const duracao = await tocarNotas(slot, st.melodia, st.baixo, st.reverbMix);
+      const duracao = await tocarNotas(slot, st.notas, st.reverbMix, st.electronico);
       const meuToken = ++tokensTimer[slot];
       setTimeout(() => {
         if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
@@ -586,7 +711,8 @@ async function pressionaPlay(slot) {
 
   // --- (3) Slot inactivo (nunca tocou ou já terminou) → tocar do zero ---
   setEstadoMsg(slot, 'A tocar...', false);
-  const duracao = await tocarNotas(slot, dados.melodia, dados.baixo, dados.musica.reverb_mix);
+  const duracao = await tocarNotas(slot, notasDeDados(dados), dados.musica.reverb_mix,
+                                   dados.musica.modo_geracao === 'electronico');
   const meuToken = ++tokensTimer[slot];
   setTimeout(() => {
     if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
@@ -1284,8 +1410,7 @@ async function selecionarPonto(lat, lon, opts = {}) {
       estilo: cfg.estilo,
       instrumentos: cfg.instrumentos.join(","),
     });
-    const r = await fetch(`${API_URL}/gerar?${q.toString()}`);
-    const dados = await r.json();
+    const dados = await gerarFetch(`${API_URL}/gerar?${q.toString()}`, slot);
 
     if (dados.erro) {
       setEstadoMsg(slot, dados.erro + (dados.dica ? ' — ' + dados.dica : ''), false);
@@ -1296,7 +1421,8 @@ async function selecionarPonto(lat, lon, opts = {}) {
     setEstadoMsg(slot, 'A tocar...', false);
     renderEstado();
 
-    const duracao = await tocarNotas(slot, dados.melodia, dados.baixo, dados.musica.reverb_mix);
+    const duracao = await tocarNotas(slot, notasDeDados(dados), dados.musica.reverb_mix,
+                                     dados.musica.modo_geracao === 'electronico');
     actualizarBotoesPlay();
 
     const meuToken = ++tokensTimer[slot];
