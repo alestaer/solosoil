@@ -12,7 +12,7 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01i · SoilGrids com mais tentativas + cache em disco";
+const APP_VERSION = "2026-06-01j · sem secção de pares";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
@@ -281,74 +281,6 @@ async function regenerarSlot(slot) {
     setEstadoMsg(slot, 'Erro ao actualizar: ' + err.message, false);
   }
 }
-
-// ---------------------------------------------------------------------
-//  PARES CURADOS — cada par junta um ponto com forte intervenção humana
-//  e outro de referência prístina dentro do mesmo bioma/clima.
-// ---------------------------------------------------------------------
-// Pares de contraste. O eixo fiável que o projeto mede é a PRESSÃO HUMANA
-// (via OpenStreetMap: minas, indústria, etc.), não uma "saúde" absoluta — um
-// solo natural pobre (semiárido, árctico) pode dar saúde baixa sem intervenção.
-// Por isso o contraste é "muita pressão humana" vs "pouca pressão humana", e os
-// pontos estão em zonas agrícolas/florestais de boa cobertura no SoilGrids
-// (evitam-se desertos, gelo e mar, onde os dados faltam).
-const PARES_SUGERIDOS = [
-  {
-    titulo: "Mineração polimetálica vs interior agrícola",
-    intervencionado: {
-      nome: "Minas de Riotinto", lat: 37.689, lon: -6.594,
-      porque: "Bacia mineira histórica de cobre e sulfuretos (Andaluzia)"
-    },
-    pristino: {
-      nome: "Campo de Beja", lat: 38.015, lon: -7.865,
-      porque: "Planície agrícola alentejana sem indústria pesada próxima"
-    }
-  },
-  {
-    titulo: "Pólo industrial vs floresta de montanha",
-    intervencionado: {
-      nome: "Vale do Ruhr (Essen)", lat: 51.451, lon: 7.013,
-      porque: "Antiga bacia carbonífera e siderúrgica, solo muito alterado"
-    },
-    pristino: {
-      nome: "Floresta Negra", lat: 48.000, lon: 8.200,
-      porque: "Maciço florestal do sudoeste alemão, baixa pressão industrial"
-    }
-  },
-  {
-    titulo: "Cintura industrial vs floresta primária",
-    intervencionado: {
-      nome: "Katowice (Alta Silésia)", lat: 50.260, lon: 19.020,
-      porque: "Região de carvão e metalurgia mais densa da Polónia"
-    },
-    pristino: {
-      nome: "Floresta de Białowieża", lat: 52.700, lon: 23.860,
-      porque: "Última floresta primária de planície da Europa"
-    }
-  },
-  {
-    titulo: "Agricultura intensiva vs montado tradicional",
-    intervencionado: {
-      nome: "Regadio do Vale do Pó", lat: 45.100, lon: 9.500,
-      porque: "Agricultura intensiva com séculos de fertilização e drenagem"
-    },
-    pristino: {
-      nome: "Montado de Évora", lat: 38.570, lon: -7.910,
-      porque: "Sistema agro-silvo-pastoril extensivo, baixa intervenção"
-    }
-  },
-  {
-    titulo: "Periferia metropolitana vs reserva de planície",
-    intervencionado: {
-      nome: "Periferia de Milão", lat: 45.420, lon: 9.270,
-      porque: "Solo periurbano sob forte pressão industrial e urbana"
-    },
-    pristino: {
-      nome: "Parque do Ticino", lat: 45.270, lon: 8.880,
-      porque: "Reserva da biosfera fluvial adjacente, mesma planície"
-    }
-  }
-];
 
 // ---------------------------------------------------------------------
 //  MAPA (igual ao anterior)
@@ -1876,38 +1808,6 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------------
-//  PARES SUGERIDOS — render + handlers
-// ---------------------------------------------------------------------
-function renderParesSugeridos() {
-  const div = document.getElementById('pares-lista');
-  if (!div) return;
-
-  div.innerHTML = PARES_SUGERIDOS.map((par, i) => {
-    const a = par.intervencionado;
-    const b = par.pristino;
-    return `
-      <div class="par" data-par="${i}">
-        <button class="par-chip par-chip-interv"
-                data-lat="${a.lat}" data-lon="${a.lon}"
-                title="${a.porque}">${a.nome}</button>
-        <span class="par-vs">vs</span>
-        <button class="par-chip par-chip-prist"
-                data-lat="${b.lat}" data-lon="${b.lon}"
-                title="${b.porque}">${b.nome}</button>
-      </div>
-    `;
-  }).join('');
-
-  div.querySelectorAll('.par-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const lat = parseFloat(chip.dataset.lat);
-      const lon = parseFloat(chip.dataset.lon);
-      selecionarPonto(lat, lon, { flyTo: true, nome: chip.textContent.trim() });
-    });
-  });
-}
-
-// ---------------------------------------------------------------------
 //  TOGGLE DE TEMA (claro / escuro)
 // ---------------------------------------------------------------------
 const ICONE_LUA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
@@ -1937,6 +1837,5 @@ document.getElementById('toggle-tema')?.addEventListener('click', () => {
 //  ARRANQUE
 // ---------------------------------------------------------------------
 actualizarIconeTema();
-renderParesSugeridos();
 montarControlos();
 renderEstado();   // pinta um shell vazio para a amostra A
