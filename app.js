@@ -12,7 +12,7 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01f · registo seguro + pH-registo + menos atonal + a11y + ficha PDF";
+const APP_VERSION = "2026-06-01g · sem auto-play + fetch robusto + contraste de tempo";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
@@ -1636,24 +1636,23 @@ async function selecionarPonto(lat, lon, opts = {}) {
     }
 
     estado[slot.toLowerCase()].dados = dados;
-    setEstadoMsg(slot, 'A tocar...', false);
+    // Não toca automaticamente: prepara a lista de notas e mostra "pronto",
+    // deixando o utilizador carregar em ▶ quando quiser.
+    resetSlotState(slot);
+    slotState[slot].notas = notasDeDados(dados);
+    slotState[slot].reverbMix = dados.musica.reverb_mix;
+    slotState[slot].electronico = dados.musica.modo_geracao === 'electronico';
+    setEstadoMsg(slot, msgPronto(), false);
     renderEstado();
-
-    const duracao = await tocarNotas(slot, notasDeDados(dados), dados.musica.reverb_mix,
-                                     dados.musica.modo_geracao === 'electronico');
     actualizarBotoesPlay();
 
-    const meuToken = ++tokensTimer[slot];
-    setTimeout(() => {
-      if (tokensTimer[slot] === meuToken && slotAtivo === slot && !slotState[slot].pausado) {
-        slotAtivo = null;
-        setEstadoMsg(slot, msgPronto(), false);
-        actualizarBotoesPlay();
-      }
-    }, duracao * 1000 + 250);
-
   } catch (err) {
-    setEstadoMsg(slot, 'Erro: ' + err.message, false);
+    const st = estado[slot.toLowerCase()];
+    if (st) st.carregando = false;
+    setEstadoMsg(slot,
+      'Não consegui obter os dados do solo (o serviço SoilGrids pode estar lento). '
+      + 'Tenta outra vez ou escolhe outro ponto.', false);
+    renderEstado();
   }
 }
 

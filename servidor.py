@@ -493,7 +493,7 @@ def extrair_valor(dados, propriedade, fator_escala):
         return None
 
 
-def buscar_solo(lat, lon):
+def buscar_solo(lat, lon, timeout=12, tentativas=2):
     url = "https://rest.isric.org/soilgrids/v2.0/properties/query"
     params = {
         "lon": lon, "lat": lat,
@@ -501,9 +501,19 @@ def buscar_solo(lat, lon):
                      "cec", "nitrogen", "bdod", "cfvo"],
         "depth": ["0-5cm", "5-15cm", "15-30cm"], "value": "mean",
     }
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    dados = r.json()
+    ultimo = None
+    for i in range(tentativas):
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+            r.raise_for_status()
+            dados = r.json()
+            break
+        except requests.RequestException as e:
+            ultimo = e
+            if i < tentativas - 1:
+                time.sleep(0.8)        # o SoilGrids falha de forma intermitente
+            else:
+                raise
     valores = {
         "pH":        extrair_valor(dados, "phh2o", 10),
         "c_org":     extrair_valor(dados, "soc",   10),
@@ -759,10 +769,16 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
     n_minas   = contagens.get("mina", 0)
     n_pesada  = contagens.get("industria_pesada", 0)
 
-    # --- ANDAMENTO: só pela dificuldade (sem influência de areia/argila) ---
+    # --- ANDAMENTO: dentro da gama da dificuldade, a VITALIDADE do solo
+    #     posiciona o tempo (solo vivo e fértil -> mais rápido; pobre/seco ->
+    #     mais lento). Isto torna o contraste entre solos muito mais audível. ---
     bpm_min, bpm_max = env["bpm"]
-    bpm = float(np.clip((bpm_min + bpm_max) / 2 + np.random.uniform(-4, 4),
-                        bpm_min, bpm_max))
+    # vitalidade combina carbono orgânico, azoto e nutrientes (0..1)
+    vital = float(np.clip(0.45 * (c_org / 40.0) + 0.30 * (azoto / 5.0)
+                          + 0.25 * disponibilidade_nutrientes(v["pH"])["indice"],
+                          0.0, 1.0))
+    bpm = float(np.clip(bpm_min + (bpm_max - bpm_min) * vital
+                        + np.random.uniform(-3, 3), bpm_min, bpm_max))
 
     # --- TEXTURA MELÓDICA: areia=saltos+espaço ; argila=conjunto+ligado ---
     eixo = (areia - argila) / 100.0                      # -1 (argila) .. +1 (areia)
@@ -1984,22 +2000,26 @@ def _tem_dados(valores):
 
 def solo_com_vizinhanca(lat, lon):
     """Busca o solo em (lat, lon). Se não houver dados (costa, lago, célula
-    vazia), tenta pontos vizinhos numa pequena espiral (~5–25 km) e devolve o
-    primeiro com dados, junto do desvio aplicado. Evita o falhanço seco em
-    pontos perto de água ou em buracos de cobertura do SoilGrids."""
+    vazia), tenta UNS POUCOS pontos vizinhos (rápido, com orçamento de tempo)
+    e devolve o primeiro com dados. Pensado para nunca prender o pedido: cada
+    sonda tem timeout curto e há um teto de tempo total."""
     _, valores = solo_em_cache(lat, lon)
     if _tem_dados(valores):
         return valores, lat, lon, 0.0
-    # anéis crescentes (graus ~ 0.05°≈5,5km, 0.1°, 0.22°) em 8 direções
-    for d in (0.05, 0.1, 0.22):
-        for dlat, dlon in ((0, d), (0, -d), (d, 0), (-d, 0),
-                           (d, d), (d, -d), (-d, d), (-d, -d)):
+    # poucos pontos (4 diagonais a ~8 km e ~16 km), timeout curto por sonda,
+    # e um orçamento total de ~8 s para não bloquear o frontend.
+    inicio = time.time()
+    for d in (0.07, 0.15):
+        for dlat, dlon in ((d, d), (d, -d), (-d, d), (-d, -d)):
+            if time.time() - inicio > 8:
+                return valores, lat, lon, None
             la, lo = _normalizar_coords(lat + dlat, lon + dlon)
             try:
-                _, vv = solo_em_cache(la, lo)
+                _, vv = buscar_solo(la, lo, timeout=6, tentativas=1)
             except requests.RequestException:
                 continue
             if _tem_dados(vv):
+                _CACHE_SOLO[_chave_coord(la, lo)] = (time.time(), (None, vv))
                 desvio = ((dlat ** 2 + dlon ** 2) ** 0.5) * 111.0   # km aprox.
                 return vv, la, lo, round(desvio, 1)
     return valores, lat, lon, None      # nada por perto
