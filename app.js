@@ -12,7 +12,7 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01b · grupos+rubato+apogiaturas+nome-do-local";
+const APP_VERSION = "2026-06-01c · nome detalhado (local+instr+epoca+dif)";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
@@ -1102,6 +1102,19 @@ function descarregar(blob, nome) {
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
+// Abreviaturas curtas para nome de ficheiro.
+const ABREV_INSTR = {
+  piano: "pno", celesta: "cel", violino: "vln", viola: "vla", violoncelo: "vlc",
+  contrabaixo: "cbx", harpa: "hrp", guitarra: "gtr", flauta: "fl", flautim: "flm",
+  oboe: "ob", clarinete: "cl", fagote: "fg", trompete: "tpt", trompa: "tpa",
+  trombone: "tbn", tuba: "tba", marimba: "mrb", vibrafone: "vib", xilofone: "xil",
+  glockenspiel: "glk",
+};
+const ABREV_ESTILO = {
+  livre: "liv", classico: "cls", romantico: "rom", impressionista: "imp", minimal: "min",
+};
+const ABREV_DIF = { basico: "bas", intermedio: "int", avancado: "avc" };
+
 // Nome do local -> texto seguro para nome de ficheiro (sem acentos/espaços).
 function slugLocal(txt) {
   return (txt || "")
@@ -1109,15 +1122,32 @@ function slugLocal(txt) {
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase()
-    .slice(0, 48) || "local";
+    .slice(0, 40) || "local";
 }
 
-// Constrói o nome do ficheiro a partir do local guardado (ou das coordenadas).
+// Constrói o nome do ficheiro: local + instrumentos + época + dificuldade.
+// Ex.: curiousoil_aljustrel_pno-vlc_rom_avc
 function nomeFicheiro(slot) {
   const s = estado[slot.toLowerCase()];
-  if (s && s.nome) return slugLocal(s.nome);
-  if (s && s.lat != null) return slugLocal(`lat${s.lat.toFixed(2)}-lon${s.lon.toFixed(2)}`);
-  return "local";
+  const local = (s && s.nome) ? slugLocal(s.nome)
+              : (s && s.lat != null) ? slugLocal(`lat${s.lat.toFixed(2)}-lon${s.lon.toFixed(2)}`)
+              : "local";
+  const partes = [local];
+  const m = s && s.dados && s.dados.musica;
+  if (s && s.dados && Array.isArray(s.dados.partes)) {
+    // instrumentos únicos, pela ordem de aparição
+    const vistos = [];
+    s.dados.partes.forEach((p) => { if (!vistos.includes(p.instrumento)) vistos.push(p.instrumento); });
+    const instr = vistos.map((id) => ABREV_INSTR[id] || id.slice(0, 3)).join("-");
+    if (instr) partes.push(instr);
+  }
+  if (m) {
+    const epoca = (m.modo_geracao === "electronico") ? "ele" : (ABREV_ESTILO[m.estilo] || (m.estilo || "").slice(0, 3));
+    if (epoca) partes.push(epoca);
+    const dif = ABREV_DIF[m.dificuldade] || (m.dificuldade || "").slice(0, 3);
+    if (dif) partes.push(dif);
+  }
+  return partes.filter(Boolean).join("_");
 }
 
 // Escolhe um nome curto e legível da resposta de geocodificação inversa.
@@ -1149,7 +1179,7 @@ function exportarMusicXML(slot) {
   const d = estado[slot.toLowerCase()]?.dados;
   if (!d?.exportacao?.musicxml) return;
   descarregar(new Blob([d.exportacao.musicxml], { type: 'application/vnd.recordare.musicxml+xml' }),
-    `curiousoil-${nomeFicheiro(slot)}.musicxml`);
+    `curiousoil_${nomeFicheiro(slot)}.musicxml`);
 }
 function exportarMIDI(slot) {
   const d = estado[slot.toLowerCase()]?.dados;
@@ -1157,7 +1187,7 @@ function exportarMIDI(slot) {
   const bin = atob(d.exportacao.midi_base64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  descarregar(new Blob([bytes], { type: 'audio/midi' }), `curiousoil-${nomeFicheiro(slot)}.mid`);
+  descarregar(new Blob([bytes], { type: 'audio/midi' }), `curiousoil_${nomeFicheiro(slot)}.mid`);
 }
 function bufferParaWav(ab) {
   const nCh = ab.numberOfChannels, sr = ab.sampleRate, len = ab.length;
@@ -1239,7 +1269,7 @@ async function exportarWAV(slot) {
       }
     }, dur);
     const native = ab.get ? ab.get() : ab;
-    descarregar(bufferParaWav(native), `curiousoil-${nomeFicheiro(slot)}.wav`);
+    descarregar(bufferParaWav(native), `curiousoil_${nomeFicheiro(slot)}.wav`);
     setEstadoMsg(slot, msgPronto(), false);
   } catch (e) {
     console.warn('WAV falhou', e);
