@@ -12,7 +12,7 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01h · timeouts duros + rotas de diagnóstico";
+const APP_VERSION = "2026-06-01i · SoilGrids com mais tentativas + cache em disco";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
@@ -22,7 +22,7 @@ console.log("CuriouSoil frontend " + APP_VERSION);
 async function gerarFetch(url, slot, tentativas = 6) {
   for (let i = 0; i < tentativas; i++) {
     const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 35000);   // 35 s por tentativa
+    const tid = setTimeout(() => ctrl.abort(), 95000);   // 95 s por tentativa
     try {
       const r = await fetch(url, { signal: ctrl.signal });
       clearTimeout(tid);
@@ -1605,7 +1605,7 @@ async function selecionarPonto(lat, lon, opts = {}) {
     lat, lon,
     nome: opts.nome || null,
     dados: null,
-    estadoMsg: 'A buscar dados do solo...',
+    estadoMsg: 'A buscar dados do solo… (o serviço SoilGrids pode demorar até 1 min)',
     carregando: true,
   };
 

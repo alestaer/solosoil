@@ -27,6 +27,7 @@ import base64
 import struct
 import hashlib
 import time
+import json
 from xml.sax.saxutils import escape as xml_escape
 
 app = Flask(__name__)
@@ -539,7 +540,7 @@ def extrair_valor(dados, propriedade, fator_escala):
         return None
 
 
-def buscar_solo(lat, lon, timeout=12, tentativas=2):
+def buscar_solo(lat, lon, timeout=25, tentativas=3):
     url = "https://rest.isric.org/soilgrids/v2.0/properties/query"
     params = {
         "lon": lon, "lat": lat,
@@ -1844,8 +1845,38 @@ def montar_peca(valores, agua, diag, osm, opcoes):
 # ============================================================
 _CACHE_SOLO = {}
 _CACHE_OSM = {}
-_TTL_SOLO = 24 * 3600        # solo praticamente não muda
+_TTL_SOLO = 365 * 24 * 3600   # o solo praticamente não muda: guardamos por um ano
 _TTL_OSM = 6 * 3600
+
+# Cache PERSISTENTE em disco: um solo já consultado fica guardado e sobrevive
+# a reinícios do servidor (no Render gratuito isso acontece muito). Assim, numa
+# apresentação, os pontos já visitados respondem na hora mesmo que o SoilGrids
+# esteja em baixo.
+_CACHE_FICHEIRO = os.path.join(BASE_DIR, "cache_solo.json")
+
+
+def _carregar_cache_disco():
+    try:
+        with open(_CACHE_FICHEIRO, "r", encoding="utf-8") as f:
+            bruto = json.load(f)
+        for chave, valores in bruto.items():
+            la, lo = chave.split(",")
+            _CACHE_SOLO[(float(la), float(lo))] = (time.time(), (None, valores))
+    except Exception:
+        pass   # sem ficheiro ainda, ou ilegível -> começa vazio
+
+
+def _guardar_cache_disco():
+    try:
+        bruto = {}
+        for (la, lo), (_, resultado) in _CACHE_SOLO.items():
+            valores = resultado[1] if isinstance(resultado, tuple) else resultado
+            if valores and not all(v is None for v in valores.values()):
+                bruto[f"{la},{lo}"] = valores
+        with open(_CACHE_FICHEIRO, "w", encoding="utf-8") as f:
+            json.dump(bruto, f)
+    except Exception:
+        pass
 
 
 def _chave_coord(lat, lon):
@@ -1860,6 +1891,9 @@ def solo_em_cache(lat, lon):
         return e[1]
     resultado = buscar_solo(lat, lon)        # pode levantar RequestException
     _CACHE_SOLO[k] = (agora, resultado)
+    # grava em disco se trouxe dados úteis
+    if resultado and resultado[1] and not all(v is None for v in resultado[1].values()):
+        _guardar_cache_disco()
     return resultado
 
 
@@ -1873,6 +1907,10 @@ def osm_em_cache(lat, lon, raio_m=10000):
     if resultado.get("disponivel"):          # só guardamos sucessos
         _CACHE_OSM[k] = (agora, resultado)
     return resultado
+
+
+# Carrega o cache de solo do disco assim que o módulo é importado (gunicorn).
+_carregar_cache_disco()
 
 
 # ============================================================
@@ -2101,7 +2139,7 @@ def gerar():
         # Teto DURO de tempo: aconteça o que acontecer (SoilGrids/Overpass lentos
         # ou ligações meio-abertas), a rota responde sempre — nunca fica "a buscar".
         try:
-            valores, lat_us, lon_us, desvio_km = f_solo.result(timeout=30)
+            valores, lat_us, lon_us, desvio_km = f_solo.result(timeout=85)
         except concurrent.futures.TimeoutError:
             return jsonify({
                 "erro": "O serviço de dados de solo (SoilGrids) está a demorar demasiado.",
