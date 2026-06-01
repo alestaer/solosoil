@@ -96,7 +96,7 @@ ORDEM_SUST = ["F", "C", "G", "D", "A", "E", "B"]
 ORDEM_BEMOL = ["B", "E", "A", "D", "G", "C", "F"]
 
 # Tonalidades limitadas a <= 3 acidentes (exequíveis), ordenadas por brilho
-# (lado bemol = grave/escuro = ácido ; lado sustenido = brilhante = alcalino)
+# (a posição no ciclo das quintas vem do pH; ver escolher_tonalidade)
 # (tonic_pc, vexflow_keysig, fifths, etiqueta_pt)
 TONALIDADES_MAIOR = [
     (3,  "Eb", -3, "Mi♭ maior"),
@@ -202,7 +202,7 @@ def escolher_tonalidade(pH, saude_score, contaminacao_score):
         pH = 6.5
     modo = "maior" if saude_score >= 7 else "menor"
     lista = TONALIDADES_MAIOR if modo == "maior" else TONALIDADES_MENOR
-    # pH 3.5 (ácido, escuro) -> idx 0 ; pH 9 (alcalino, brilhante) -> idx 6
+    # pH baixo -> início da lista ; pH alto -> fim da lista (ciclo das quintas)
     t = (float(np.clip(pH, 3.5, 9.0)) - 3.5) / (9.0 - 3.5)
     idx = int(round(t * (len(lista) - 1)))
     tonic_pc, keysig, fifths, etiqueta = lista[idx]
@@ -370,7 +370,7 @@ ESTILOS = {
         "reverb_bonus": 0.0, "tintinnabuli": False, "frase_quadrada": True,
     },
     "romantico": {
-        "nome": "Romântico", "crom_cap": 0.20, "diss_cap": 0.10,
+        "nome": "Romântico", "crom_cap": 0.10, "diss_cap": 0.05,
         "salto_mult": 1.05, "legato_bonus": 0.30, "staccato_mult": 0.18,
         "consonante": True, "harmonia_tipo": "setima", "baixo_padrao": "arpejo",
         "prog_voc": "romantica", "tempo_mult": 0.88, "densidade_mult": 0.9,
@@ -775,6 +775,10 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
     #     bloqueada (ácido/alcalino extremo) = mais tensão, menos florescimento.
     nutri = disponibilidade_nutrientes(v["pH"])
     nutri_idx = nutri["indice"]                       # 0..1
+    # pH -> ligeiro deslocamento de registo (semitons): ácido mais grave,
+    # alcalino mais agudo. Pequeno (±5) e depois travado pelo âmbito real.
+    ph_val = v["pH"] if v["pH"] is not None else 6.5
+    desloc_ph = int(round(float(np.clip((ph_val - 6.5) * 1.6, -5, 5))))
 
     # --- VIVACIDADE (carbono orgânico): densidade rítmica + staccato ---
     #     modulada pela disponibilidade de nutrientes (vida precisa de nutrientes)
@@ -799,10 +803,10 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
     #     harmónica — o "stress" químico do solo torna-se stress musical.
     stress_ph = (1.0 - nutri_idx)
     prob_cromatico = float(np.clip(n_pesada * 0.07 + max(0, (4 - saude)) * 0.03
-                                   + stress_ph * 0.05,
+                                   + stress_ph * 0.03,
                                    0.0, env["max_cromatismo"]))
     prob_dissonancia = float(np.clip(contam * 0.03 + n_pesada * 0.04
-                                     + stress_ph * 0.04,
+                                     + stress_ph * 0.02,
                                      0.0, env["max_dissonancia"]))
 
     # --- REGISTO / peso: solo compacto soa mais grave. POR OITAVAS, para
@@ -875,6 +879,7 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
         "nutri_indice": nutri_idx,
         "nutri_etiqueta": nutri["etiqueta"],
         "nutri_limitacao": nutri["limitacao"],
+        "desloc_ph": desloc_ph,
     }
 
 
@@ -1043,6 +1048,20 @@ def aplicar_rubato(partes, n_compassos, beats, seg_por_q, frase, env, forca):
                 ev["inicio_seg"] = round(warp(ini), 4)
 
 
+def _dentro_do_ambito(midi, lim_min, lim_max):
+    """Mantém a nota DENTRO do registo real do instrumento, deslocando-a por
+    oitavas (preserva a classe de altura) em vez de a saturar no limite — assim
+    nunca se pedem notas que o instrumento não tem, sem achatar a melodia num
+    amontoado de notas repetidas no extremo."""
+    if lim_max - lim_min < 12:                 # âmbito minúsculo: clipar é o seguro
+        return int(np.clip(midi, lim_min, lim_max))
+    while midi < lim_min:
+        midi += 12
+    while midi > lim_max:
+        midi -= 12
+    return int(np.clip(midi, lim_min, lim_max))
+
+
 def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog=None, env=None):
     escala = tonal.escala_int
     tam = len(escala)
@@ -1103,7 +1122,7 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
                 alteracao_extra = 1 if np.random.random() < 0.5 else -1
                 midi += alteracao_extra
 
-            midi = int(np.clip(midi, lim_min, lim_max))
+            midi = _dentro_do_ambito(midi, lim_min, lim_max)
 
             # Dinâmica governada pelo envelope (clímax na secção áurea):
             # pp/p nas margens, f/ff no auge.
@@ -1129,8 +1148,8 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
                         and np.random.random() < p["ornamentos"])
             if faz_apog:
                 g_ap = int(np.clip(grau + 1, -amb // 2, amb // 2))
-                m_ap = int(np.clip(tonal.grau_para_midi(g_ap, oitava_base + oct_off),
-                                   lim_min, lim_max))
+                m_ap = _dentro_do_ambito(tonal.grau_para_midi(g_ap, oitava_base + oct_off),
+                                   lim_min, lim_max)
                 s_ap = tonal.soletrar(m_ap)
                 eventos.append(_evento_nota(m_ap, meia, min(1.0, vel * 1.04), False,
                                             s_ap, tempo_q, seg_por_q, p["legato"], True))
@@ -1150,8 +1169,8 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
                 ev["acorde"] = []
                 for add in (2, 4):                            # 3ª e 5ª da escala
                     g2 = grau + add
-                    m2 = int(np.clip(tonal.grau_para_midi(g2, oitava_base + oct_off),
-                                     lim_min, lim_max))
+                    m2 = _dentro_do_ambito(tonal.grau_para_midi(g2, oitava_base + oct_off),
+                                     lim_min, lim_max)
                     s2 = tonal.soletrar(m2)
                     ev["acorde"].append({"midi": m2, "vexkey": s2["vexkey"],
                                          "vex_acc": s2["vex_acc"],
@@ -1224,8 +1243,8 @@ def gerar_harmonia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, 
         notas_acorde = []
         for add in graus_acorde:
             g = grau_raiz + add
-            m = int(np.clip(tonal.grau_para_midi(g, oitava_base),
-                            lim_min, lim_max))
+            m = _dentro_do_ambito(tonal.grau_para_midi(g, oitava_base),
+                            lim_min, lim_max)
             notas_acorde.append(m)
         # Acorde sustentado no compasso inteiro (fácil) ou em batidas
         dur_q = beats
@@ -1326,8 +1345,8 @@ def gerar_baixo(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, pro
         for g, dur_q in padrao:
             if dur_q not in DUR_TABELA:
                 dur_q = min(DUR_TABELA, key=lambda d: abs(d - dur_q))
-            m = int(np.clip(tonal.grau_para_midi(g, oitava_base),
-                            lim_min, lim_max))
+            m = _dentro_do_ambito(tonal.grau_para_midi(g, oitava_base),
+                            lim_min, lim_max)
             s = tonal.soletrar(m)
             eventos.append({
                 "is_rest": False, "midi": m, "nome": midi_para_nome(m),
@@ -1390,7 +1409,7 @@ def gerar_voz_tintinnabuli(melodia_comps, tonal, p, oitava_base, lim_min, lim_ma
                 melhor -= 12
             while centro - melhor > 6:
                 melhor += 12
-            melhor = int(np.clip(melhor, lim_min, lim_max))
+            melhor = _dentro_do_ambito(melhor, lim_min, lim_max)
             eventos.append(_evento_de(ev, melhor, tonal,
                                       float(np.clip(p["vel_base"] * 0.6, 0.3, 0.7))))
         compassos.append(eventos)
@@ -1427,11 +1446,13 @@ def gerar_pedal_tonica(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_m
 # ============================================================
 # OITAVA BASE por papel + âmbito do instrumento
 # ============================================================
-def registo_para_papel(papel, instr_id, transpor, tonic_pc):
+def registo_para_papel(papel, instr_id, transpor, tonic_pc, desloc_ph=0):
     info = INSTRUMENTOS.get(instr_id, INSTRUMENTOS["piano"])
     lim_min, lim_max = info["min"], info["max"]
     centro = {"melodia": 67, "harmonia": 55, "baixo": 43}.get(papel, 60)
-    centro = int(np.clip(centro + transpor, lim_min + 7, lim_max - 7))
+    # pH desloca o centro (ácido -> mais grave; alcalino -> mais agudo), mas
+    # sempre dentro do âmbito real do instrumento (margem de 7 semitons).
+    centro = int(np.clip(centro + transpor + desloc_ph, lim_min + 7, lim_max - 7))
     # oitava_base tal que a tónica caia perto do centro do âmbito
     oitava_base = int(round((centro - tonic_pc) / 12)) - 1
     return oitava_base, lim_min, lim_max
@@ -1716,7 +1737,7 @@ def montar_peca(valores, agua, diag, osm, opcoes):
     for entry in papeis:
         if entry["papel"] == "melodia":
             ob, lmin, lmax = registo_para_papel("melodia", entry["instrumento"],
-                                                p["transpor"], tonal.tonic_pc)
+                                                p["transpor"], tonal.tonic_pc, p.get("desloc_ph", 0))
             melodia_comps = gerar_melodia(tonal, p, metro, n_compassos, ob, lmin, lmax, prog, env)
             entry["_comps"] = melodia_comps
 
@@ -1725,7 +1746,7 @@ def montar_peca(valores, agua, diag, osm, opcoes):
     for entry in papeis:
         papel = entry["papel"]
         instr_id = entry["instrumento"]
-        ob, lmin, lmax = registo_para_papel(papel, instr_id, p["transpor"], tonal.tonic_pc)
+        ob, lmin, lmax = registo_para_papel(papel, instr_id, p["transpor"], tonal.tonic_pc, p.get("desloc_ph", 0))
         if papel == "melodia":
             comps = entry["_comps"]
         elif p["tintinnabuli"]:
@@ -1802,14 +1823,8 @@ def explicar(v, diag, agua, osm, tonal, metro, p):
     # --- Estrutura (sempre): tonalidade, carácter, compasso ---
     pH = v["pH"]
     if pH is not None:
-        if pH < 6.2:
-            lado = "para o lado grave e escuro (solo ácido)"
-        elif pH > 7.3:
-            lado = "para o lado brilhante (solo alcalino)"
-        else:
-            lado = "para uma zona central (perto do neutro)"
         cartoes.append({"tipo": "estrutura", "titulo": "Tonalidade",
-            "texto": f"O pH {pH:.1f} escolhe {tonal.etiqueta}: o pH inclina a música {lado}."})
+            "texto": f"O pH {pH:.1f} ajuda a escolher o centro tonal: {tonal.etiqueta}."})
     else:
         cartoes.append({"tipo": "estrutura", "titulo": "Tonalidade",
             "texto": f"Sem pH fiável aqui; usámos {tonal.etiqueta} por defeito."})

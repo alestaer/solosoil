@@ -931,6 +931,11 @@
     pointer-events: none; }
   .info-balao b { color: var(--musgo); }
   .info-balao > b { display: block; margin-bottom: 6px; font-size: var(--t-base); color: var(--tinta); }
+  /* skip link de acessibilidade: escondido até receber foco por teclado */
+  .salta-conteudo { position: absolute; left: -9999px; top: 0; z-index: 200;
+    background: var(--musgo); color: #fff; padding: 10px 16px; border-radius: var(--raio);
+    font: 500 var(--t-sm) var(--sans); }
+  .salta-conteudo:focus { left: 12px; top: 12px; }
   .info-balao span { display: block; margin: 4px 0; }
   .info-i:hover .info-balao, .info-i:focus-visible .info-balao { opacity: 1; visibility: visible; }
   @media (max-width: 620px) { .info-balao { left: auto; right: 0; transform: none; } }
@@ -986,6 +991,8 @@
 </style>
 </head>
 <body>
+
+<a href="#conteudo-principal" class="salta-conteudo">Saltar para o conteúdo</a>
 
 <div class="pagina">
 
@@ -1068,8 +1075,8 @@
     <p class="aviso-config" id="aviso-config" role="status"></p>
   </section>
 
-  <div class="mapa-wrap">
-    <div id="mapa"></div>
+  <div class="mapa-wrap" id="conteudo-principal">
+    <div id="mapa" role="application" aria-label="Mapa do mundo — clica num ponto para gerar a música do solo desse local"></div>
     <div class="mapa-dica" id="mapa-dica">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5L19 19M5 19l2.5-2.5M16.5 7.5L19 5"/>

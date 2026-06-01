@@ -12,7 +12,7 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01e · pH→nutrientes + snap de vizinhança + frases 4/6/8";
+const APP_VERSION = "2026-06-01f · registo seguro + pH-registo + menos atonal + a11y + ficha PDF";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
@@ -1288,11 +1288,95 @@ async function exportarWAV(slot) {
 }
 function wireExportar(slot) {
   const s = slot.toLowerCase();
-  const map = [['btn-xml-' + s, exportarMusicXML], ['btn-midi-' + s, exportarMIDI], ['btn-wav-' + s, exportarWAV]];
+  const map = [['btn-xml-' + s, exportarMusicXML], ['btn-midi-' + s, exportarMIDI],
+               ['btn-wav-' + s, exportarWAV], ['btn-ficha-' + s, gerarFicha]];
   map.forEach(([id, fn]) => {
     const b = document.getElementById(id);
     if (b) { b.disabled = false; b.onclick = () => fn(slot); }
   });
+}
+
+// Ficha imprimível (PDF via diálogo de impressão do browser): reúne o local,
+// os valores do solo, as definições musicais e a explicação numa página limpa.
+function gerarFicha(slot) {
+  const s = estado[slot.toLowerCase()];
+  const d = s && s.dados;
+  if (!d) return;
+  const solo = d.solo || {};
+  const m = d.musica || {};
+  const pres = d.pressao_humana || {};
+  const nome = (s.nome || `Lat ${s.lat.toFixed(3)}, Lon ${s.lon.toFixed(3)}`);
+  const linha = (k, v) => (v === null || v === undefined || v === '') ? '' : `<tr><th>${k}</th><td>${v}</td></tr>`;
+  const cartoes = (m.explicacao || []).map(c =>
+    `<div class="fx-cartao"><b>${c.titulo}</b><span>${c.texto}</span></div>`).join('');
+  const avisos = (solo.avisos && solo.avisos.length)
+    ? `<ul class="fx-avisos">${solo.avisos.map(a => `<li>${a}</li>`).join('')}</ul>`
+    : '<p>Poucos sinais de alerta.</p>';
+
+  const html = `<!doctype html><html lang="pt"><head><meta charset="utf-8">
+    <title>CuriouSoil — ${nome}</title>
+    <style>
+      @page { margin: 18mm; }
+      * { box-sizing: border-box; }
+      body { font: 14px/1.5 -apple-system, Segoe UI, Roboto, sans-serif; color: #2b251c; }
+      h1 { font-size: 22px; margin: 0 0 2px; }
+      h2 { font-size: 15px; margin: 20px 0 6px; border-bottom: 1px solid #d9d0bb; padding-bottom: 3px; color: #5a7a3a; }
+      .sub { color: #6b6253; margin: 0 0 14px; }
+      table { border-collapse: collapse; width: 100%; margin: 4px 0 8px; }
+      th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+      th { width: 42%; font-weight: 600; color: #4a4335; }
+      .fx-cartao { margin: 6px 0; }
+      .fx-cartao b { color: #5a7a3a; } .fx-cartao span { display: block; }
+      .fx-avisos { margin: 4px 0; padding-left: 18px; }
+      .rodape { margin-top: 22px; font-size: 11px; color: #9a9182; }
+      .cols { display: flex; gap: 24px; } .cols > div { flex: 1; }
+    </style></head><body>
+    <h1>CuriouSoil — ${nome}</h1>
+    <p class="sub">Lat ${s.lat.toFixed(4)}, Lon ${s.lon.toFixed(4)}${solo.aviso_local ? ' · ' + solo.aviso_local : ''}</p>
+    <div class="cols">
+      <div>
+        <h2>Solo</h2>
+        <table>
+          ${linha('pH', solo.pH)}
+          ${linha('Carbono orgânico (g/kg)', solo.carbono_organico_g_kg)}
+          ${linha('Textura', solo.textura)}
+          ${linha('Areia / Argila / Limo (%)', (solo.areia_pct ?? '—') + ' / ' + (solo.argila_pct ?? '—') + ' / ' + (solo.limo_pct ?? '—'))}
+          ${linha('CEC', solo.cec)}
+          ${linha('Azoto', solo.azoto)}
+          ${linha('Densidade', solo.densidade)}
+          ${linha('Retenção de água (%)', solo.retencao_agua ? solo.retencao_agua.awc_pct : null)}
+          ${linha('Saúde do solo', (solo.saude_score ?? '—') + '/10')}
+          ${linha('Pressão humana', pres.disponivel ? (pres.score + ' (raio ' + pres.raio_km + ' km)') : '—')}
+        </table>
+        <h2>Sinais de alerta</h2>
+        ${avisos}
+      </div>
+      <div>
+        <h2>Música</h2>
+        <table>
+          ${linha('Tonalidade', m.tonalidade)}
+          ${linha('Modo', m.modo)}
+          ${linha('Estilo', m.estilo_nome)}
+          ${linha('Compasso', m.compasso)}
+          ${linha('Andamento (BPM)', m.bpm)}
+          ${linha('Compassos', m.n_compassos)}
+          ${linha('Duração (s)', m.duracao_seg)}
+          ${linha('Frase (compassos)', m.frase_compassos)}
+          ${linha('Dificuldade', m.dificuldade)}
+          ${linha('Disponibilidade de nutrientes', m.nutri_etiqueta ? `${m.nutri_etiqueta} (${Math.round((m.nutri_indice||0)*100)}%)` : null)}
+        </table>
+        <h2>Como o solo virou música</h2>
+        ${cartoes || '<p>—</p>'}
+      </div>
+    </div>
+    <p class="rodape">Gerado por CuriouSoil · dados de solo: SoilGrids (ISRIC) · pressão humana: OpenStreetMap.
+       A correspondência solo→música combina mapeamento de dados e convenções musicais.</p>
+    <script>window.onload = () => { window.print(); };<\/script>
+    </body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { alert('Permite pop-ups para gerar a ficha.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 // ---------------------------------------------------------------------
@@ -1347,7 +1431,7 @@ function htmlPainel(slot) {
           <span class="info-i" tabindex="0" aria-label="Que parâmetro do solo influencia o quê">i
             <span class="info-balao" role="tooltip">
               <b>O que o solo decide na música</b>
-              <span><b>pH</b> → (1) centro tonal: ácido = bemóis (mais escuro), alcalino = sustenidos (mais brilhante); (2) disponibilidade de nutrientes: pH 6–7 = harmonia rica e estável, ácido/alcalino extremo = mais tensão</span>
+              <span><b>pH</b> → disponibilidade de nutrientes: pH 6–7 (ponto doce) = harmonia rica e estável; ácido ou alcalino extremo = mais tensão. Também desloca ligeiramente o registo (ácido mais grave, alcalino mais agudo).</span>
               <span><b>Saúde do solo</b> → modo: saudável = <i>maior</i>, degradado = <i>menor</i></span>
               <span><b>Carbono orgânico</b> → vivacidade: mais matéria orgânica = ritmo mais animado</span>
               <span><b>Retenção de água</b> → frases mais longas, mais legato e reverberação</span>
@@ -1368,6 +1452,7 @@ function htmlPainel(slot) {
             <button class="mini-export" id="btn-xml-${s}" disabled title="Abre no MuseScore/Finale">MusicXML</button>
             <button class="mini-export" id="btn-midi-${s}" disabled title="Ficheiro MIDI">MIDI</button>
             <button class="mini-export" id="btn-wav-${s}" disabled title="Áudio WAV">WAV</button>
+            <button class="mini-export" id="btn-ficha-${s}" disabled title="Ficha imprimível (PDF) com o solo e a música">Ficha (PDF)</button>
           </span>
         </h3>
         <div class="part-svg-wrap" id="partitura-${s}"></div>
