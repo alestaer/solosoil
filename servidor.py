@@ -367,7 +367,7 @@ ESTILOS = {
         "salto_mult": 0.9, "legato_bonus": 0.05, "staccato_mult": 1.0,
         "consonante": True, "harmonia_tipo": "triade", "baixo_padrao": "alberti",
         "prog_voc": "funcional", "tempo_mult": 1.0, "densidade_mult": 1.0,
-        "reverb_bonus": 0.0, "tintinnabuli": False,
+        "reverb_bonus": 0.0, "tintinnabuli": False, "frase_quadrada": True,
     },
     "romantico": {
         "nome": "Romântico", "crom_cap": 0.20, "diss_cap": 0.10,
@@ -375,7 +375,7 @@ ESTILOS = {
         "consonante": True, "harmonia_tipo": "setima", "baixo_padrao": "arpejo",
         "prog_voc": "romantica", "tempo_mult": 0.88, "densidade_mult": 0.9,
         "reverb_bonus": 0.18, "tintinnabuli": False,
-        "rubato": 0.18, "ornamentos": 0.22,
+        "rubato": 0.18, "ornamentos": 0.22, "frase_quadrada": True,
     },
     "impressionista": {
         "nome": "Impressionista", "crom_cap": 0.0, "diss_cap": 0.0,
@@ -787,6 +787,16 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
     prob_cromatico = float(np.clip(prob_cromatico, 0.0, est["crom_cap"]))
     prob_dissonancia = float(np.clip(prob_dissonancia, 0.0, est["diss_cap"]))
     reverb_mix = float(np.clip(reverb_mix + est["reverb_bonus"], 0.08, 0.9))
+    # Frase "quadrada": estilos clássico/romântico tendem a frases regulares de
+    # 4, 6 ou 8 compassos (a periodicidade da música tonal). A retenção de água
+    # do solo continua a decidir QUAL destes (mais água -> frases mais longas).
+    if est.get("frase_quadrada"):
+        if frase_compassos <= 4:
+            frase_compassos = 4
+        elif frase_compassos <= 6:
+            frase_compassos = 6
+        else:
+            frase_compassos = 8
     # densidade: empurra a vivacidade efetiva (usada na escolha de células)
     vivacidade_efetiva = float(np.clip(vivacidade * est["densidade_mult"], 0.0, 1.0))
     if est["densidade_mult"] < 1.0:

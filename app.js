@@ -12,7 +12,7 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01c · nome detalhado (local+instr+epoca+dif)";
+const APP_VERSION = "2026-06-01d · frases 4/6/8 + pares revistos + tooltip info";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
@@ -281,60 +281,66 @@ async function regenerarSlot(slot) {
 //  PARES CURADOS — cada par junta um ponto com forte intervenção humana
 //  e outro de referência prístina dentro do mesmo bioma/clima.
 // ---------------------------------------------------------------------
+// Pares de contraste. O eixo fiável que o projeto mede é a PRESSÃO HUMANA
+// (via OpenStreetMap: minas, indústria, etc.), não uma "saúde" absoluta — um
+// solo natural pobre (semiárido, árctico) pode dar saúde baixa sem intervenção.
+// Por isso o contraste é "muita pressão humana" vs "pouca pressão humana", e os
+// pontos estão em zonas agrícolas/florestais de boa cobertura no SoilGrids
+// (evitam-se desertos, gelo e mar, onde os dados faltam).
 const PARES_SUGERIDOS = [
   {
-    titulo: "Mineração polimetálica vs reserva alentejana",
+    titulo: "Mineração polimetálica vs interior agrícola",
     intervencionado: {
-      nome: "Aljustrel", lat: 37.876, lon: -8.165,
-      porque: "Minas activas de cobre, zinco e chumbo na Faixa Piritosa"
+      nome: "Minas de Riotinto", lat: 37.689, lon: -6.594,
+      porque: "Bacia mineira histórica de cobre e sulfuretos (Andaluzia)"
     },
     pristino: {
-      nome: "Serra de São Mamede", lat: 39.310, lon: -7.380,
-      porque: "Parque natural alentejano em xistos não explorados"
+      nome: "Campo de Beja", lat: 38.015, lon: -7.865,
+      porque: "Planície agrícola alentejana sem indústria pesada próxima"
     }
   },
   {
-    titulo: "Petroquímica costeira vs litoral protegido",
+    titulo: "Pólo industrial vs floresta de montanha",
     intervencionado: {
-      nome: "Complexo de Sines", lat: 37.954, lon: -8.812,
-      porque: "Refinaria e zona industrial portuária com emissões fósseis"
+      nome: "Vale do Ruhr (Essen)", lat: 51.451, lon: 7.013,
+      porque: "Antiga bacia carbonífera e siderúrgica, solo muito alterado"
     },
     pristino: {
-      nome: "Serra da Arrábida", lat: 38.490, lon: -8.985,
-      porque: "Parque natural costeiro em calcário, mesmo litoral atlântico"
+      nome: "Floresta Negra", lat: 48.000, lon: 8.200,
+      porque: "Maciço florestal do sudoeste alemão, baixa pressão industrial"
     }
   },
   {
-    titulo: "Acidente nuclear vs floresta primária temperada",
+    titulo: "Cintura industrial vs floresta primária",
     intervencionado: {
-      nome: "Chernobyl (zona de exclusão)", lat: 51.415, lon: 30.220,
-      porque: "Solo contaminado por radionuclídeos desde 1986"
+      nome: "Katowice (Alta Silésia)", lat: 50.260, lon: 19.020,
+      porque: "Região de carvão e metalurgia mais densa da Polónia"
     },
     pristino: {
       nome: "Floresta de Białowieża", lat: 52.700, lon: 23.860,
-      porque: "Última floresta primária da Europa, mesma latitude"
+      porque: "Última floresta primária de planície da Europa"
     }
   },
   {
-    titulo: "Agricultura intensiva sob plástico vs reserva semiárida",
+    titulo: "Agricultura intensiva vs montado tradicional",
     intervencionado: {
-      nome: "Almería (mar de plásticos)", lat: 36.785, lon: -2.685,
-      porque: "Estufas intensivas com fertilização química há décadas"
+      nome: "Regadio do Vale do Pó", lat: 45.100, lon: 9.500,
+      porque: "Agricultura intensiva com séculos de fertilização e drenagem"
     },
     pristino: {
-      nome: "Cabo de Gata", lat: 36.762, lon: -2.135,
-      porque: "Reserva semiárida andaluza adjacente, sem irrigação"
+      nome: "Montado de Évora", lat: 38.570, lon: -7.910,
+      porque: "Sistema agro-silvo-pastoril extensivo, baixa intervenção"
     }
   },
   {
-    titulo: "Fundição de níquel vs reserva ártica da UNESCO",
+    titulo: "Periferia metropolitana vs reserva de planície",
     intervencionado: {
-      nome: "Norilsk", lat: 69.350, lon: 88.180,
-      porque: "Maior emissor mundial de SO2, solo metalífero ácido"
+      nome: "Periferia de Milão", lat: 45.420, lon: 9.270,
+      porque: "Solo periurbano sob forte pressão industrial e urbana"
     },
     pristino: {
-      nome: "Planalto de Putorana", lat: 69.000, lon: 94.500,
-      porque: "Reserva ártica intocada à mesma latitude siberiana"
+      nome: "Parque do Ticino", lat: 45.270, lon: 8.880,
+      porque: "Reserva da biosfera fluvial adjacente, mesma planície"
     }
   }
 ];
@@ -1335,7 +1341,22 @@ function htmlPainel(slot) {
       </div>
 
       <div class="caixa larga">
-        <h3>Como o solo virou música</h3>
+        <h3>Como o solo virou música
+          <span class="info-i" tabindex="0" aria-label="Que parâmetro do solo influencia o quê">i
+            <span class="info-balao" role="tooltip">
+              <b>O que o solo decide na música</b>
+              <span><b>pH</b> → centro tonal: ácido = tonalidade com bemóis (mais escura), alcalino = com sustenidos (mais brilhante)</span>
+              <span><b>Saúde do solo</b> → modo: saudável = <i>maior</i>, degradado = <i>menor</i></span>
+              <span><b>Carbono orgânico</b> → vivacidade: mais matéria orgânica = ritmo mais animado</span>
+              <span><b>Retenção de água</b> → frases mais longas, mais legato e reverberação</span>
+              <span><b>Azoto</b> → dinâmica: mais azoto = notas mais fortes</span>
+              <span><b>CEC</b> → probabilidade de acordes (textura mais rica)</span>
+              <span><b>Densidade</b> → registo: solo compactado = som mais grave</span>
+              <span><b>Textura</b> (areia/argila/limo) → compasso e tipo de ritmo</span>
+              <span><b>Pressão humana</b> (minas, indústria) → cromatismo e dissonância</span>
+            </span>
+          </span>
+        </h3>
         <div id="explicacao-${s}"><p class="placeholder">Sem leitura.</p></div>
       </div>
 
