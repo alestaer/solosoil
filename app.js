@@ -12,19 +12,24 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01g · sem auto-play + fetch robusto + contraste de tempo";
+const APP_VERSION = "2026-06-01h · timeouts duros + rotas de diagnóstico";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
-// dar 502/503/504 enquanto arranca (até ~1 min). Esta função repete várias
-// vezes com recuo crescente, avisando que está "a acordar o servidor".
+// dar 502/503/504 ou demorar enquanto arranca. Esta função repete várias
+// vezes com recuo crescente E impõe um timeout a cada tentativa (com
+// AbortController), para o pedido nunca ficar pendente para sempre.
 async function gerarFetch(url, slot, tentativas = 6) {
   for (let i = 0; i < tentativas; i++) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 35000);   // 35 s por tentativa
     try {
-      const r = await fetch(url);
+      const r = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(tid);
       if ([502, 503, 504].includes(r.status)) throw new Error('servidor a acordar (' + r.status + ')');
       return await r.json();
     } catch (e) {
+      clearTimeout(tid);
       if (i >= tentativas - 1) throw e;
       if (slot) setEstadoMsg(slot, 'A acordar o servidor… (até ~1 min na 1ª vez)', true);
       await new Promise((res) => setTimeout(res, Math.min(9000, 3000 * (i + 1))));

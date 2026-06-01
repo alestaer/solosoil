@@ -66,6 +66,52 @@ def _normalizar_coords(lat, lon):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+@app.route("/saude")
+def _saude():
+    # Ping rápido — NÃO contacta SoilGrids nem Overpass. Se isto responde
+    # depressa mas /gerar fica preso, o problema são os serviços externos.
+    return jsonify({"ok": True, "servico": "CuriouSoil", "versao": "g"})
+
+
+@app.route("/gerar_demo")
+def _gerar_demo():
+    # Gera uma peça com um solo FIXO (sem rede externa), para confirmar que o
+    # motor musical funciona mesmo quando o SoilGrids está em baixo.
+    valores = {"pH": 6.6, "c_org": 30.0, "areia": 35.0, "argila": 25.0,
+               "limo": 40.0, "cec": 200.0, "azoto": 2.5, "densidade": 1.25,
+               "pedregoso": 4.0}
+    osm = {"disponivel": False, "contagens": {}, "elementos": [],
+           "pressao_score": 0, "raio_km": 10}
+    np.random.seed(42)
+    opcoes = _ler_opcoes()
+    agua = calcular_retencao_agua(valores["areia"], valores["argila"], valores["c_org"])
+    diag = diagnosticar(valores, agua, osm)
+    tonal, p, metro, n_compassos, partes, duracao_real = montar_peca(
+        valores, agua, diag, osm, opcoes)
+    env = envelope_intensidade(n_compassos)
+    musicxml = construir_musicxml(partes, tonal, metro, env=env)
+    midi_b64 = base64.b64encode(construir_midi(partes, p["bpm"], tonal, metro)).decode("ascii")
+    if p.get("rubato", 0.0) > 0:
+        aplicar_rubato(partes, n_compassos, META_BATIDAS[metro], 60.0 / p["bpm"],
+                       p["frase_compassos"], env, p["rubato"])
+    mel, bx = flatten_para_legado(partes)
+    return jsonify({
+        "solo": {"pH": 6.6, "textura": diag["textura"], "avisos": diag["avisos"],
+                 "saude_score": diag["saude_score"], "aviso_local": "DEMO (solo fixo, sem SoilGrids)"},
+        "musica": {"tonalidade": tonal.etiqueta, "modo": tonal.modo,
+                   "compasso": f"{META_VEX[metro][0]}/{META_VEX[metro][1]}",
+                   "compasso_num": META_VEX[metro][0], "compasso_den": META_VEX[metro][1],
+                   "bpm": round(p["bpm"], 1), "n_compassos": n_compassos,
+                   "duracao_seg": duracao_real, "estilo": opcoes["estilo"],
+                   "estilo_nome": ESTILOS.get(opcoes["estilo"], ESTILOS["livre"])["nome"],
+                   "modo_geracao": opcoes["modo"], "reverb_mix": round(p["reverb_mix"], 2),
+                   "dificuldade": opcoes["dificuldade"], "frase_compassos": p["frase_compassos"],
+                   "explicacao": explicar(valores, diag, agua, osm, tonal, metro, p)},
+        "partes": partes, "melodia": mel, "baixo": bx,
+        "exportacao": {"musicxml": musicxml, "midi_base64": midi_b64},
+    })
+
+
 @app.route("/")
 def _index():
     # Serve a página, se index.html estiver ao lado do servidor.
@@ -2052,11 +2098,23 @@ def gerar():
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         f_solo = pool.submit(solo_com_vizinhanca, lat, lon)
         f_osm = pool.submit(osm_em_cache, lat, lon, 10000)
+        # Teto DURO de tempo: aconteça o que acontecer (SoilGrids/Overpass lentos
+        # ou ligações meio-abertas), a rota responde sempre — nunca fica "a buscar".
         try:
-            valores, lat_us, lon_us, desvio_km = f_solo.result()
+            valores, lat_us, lon_us, desvio_km = f_solo.result(timeout=30)
+        except concurrent.futures.TimeoutError:
+            return jsonify({
+                "erro": "O serviço de dados de solo (SoilGrids) está a demorar demasiado.",
+                "dica": "Tenta novamente daqui a pouco ou escolhe outro ponto.",
+            }), 504
         except requests.RequestException as e:
             return jsonify({"erro": f"Falha ao contactar SoilGrids: {e}"}), 502
-        osm = f_osm.result()
+        try:
+            osm = f_osm.result(timeout=5)
+        except Exception:
+            # OSM é secundário: se falhar/demorar, seguimos sem pressão humana
+            osm = {"disponivel": False, "contagens": {}, "elementos": [],
+                   "pressao_score": 0, "raio_km": 10}
 
     if not _tem_dados(valores):
         return jsonify({
