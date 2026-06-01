@@ -12,7 +12,7 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
 
 // Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
 // é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
-const APP_VERSION = "2026-06-01d · frases 4/6/8 + pares revistos + tooltip info";
+const APP_VERSION = "2026-06-01e · pH→nutrientes + snap de vizinhança + frases 4/6/8";
 console.log("CuriouSoil frontend " + APP_VERSION);
 
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
@@ -962,13 +962,15 @@ function renderAvisos(slot, solo) {
   if (!div) return;
   const avisos = solo.avisos || [];
   const score = solo.saude_score ?? 10;
+  const ajuste = solo.aviso_local
+    ? `<div class="aviso-ajuste">↪ ${solo.aviso_local}</div>` : '';
   if (avisos.length === 0) {
-    div.innerHTML = `<div class="avisos ok"><b>Solo saudável</b>Saúde: ${score}/10</div>`;
+    div.innerHTML = `<div class="avisos ok"><b>Poucos sinais de alerta</b>Saúde do solo: ${score}/10</div>${ajuste}`;
   } else {
     div.innerHTML = `<div class="avisos">
       <b>Sinais de alerta (saúde: ${score}/10)</b>
       ${avisos.map(a => '• ' + a).join('<br>')}
-    </div>`;
+    </div>${ajuste}`;
   }
 }
 
@@ -1345,7 +1347,7 @@ function htmlPainel(slot) {
           <span class="info-i" tabindex="0" aria-label="Que parâmetro do solo influencia o quê">i
             <span class="info-balao" role="tooltip">
               <b>O que o solo decide na música</b>
-              <span><b>pH</b> → centro tonal: ácido = tonalidade com bemóis (mais escura), alcalino = com sustenidos (mais brilhante)</span>
+              <span><b>pH</b> → (1) centro tonal: ácido = bemóis (mais escuro), alcalino = sustenidos (mais brilhante); (2) disponibilidade de nutrientes: pH 6–7 = harmonia rica e estável, ácido/alcalino extremo = mais tensão</span>
               <span><b>Saúde do solo</b> → modo: saudável = <i>maior</i>, degradado = <i>menor</i></span>
               <span><b>Carbono orgânico</b> → vivacidade: mais matéria orgânica = ritmo mais animado</span>
               <span><b>Retenção de água</b> → frases mais longas, mais legato e reverberação</span>

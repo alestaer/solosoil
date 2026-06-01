@@ -694,6 +694,35 @@ def diagnosticar(v, agua, osm):
 # ============================================================
 # MAPEAMENTO SOLO -> PARÂMETROS MUSICAIS
 # ============================================================
+def disponibilidade_nutrientes(pH):
+    """Índice 0..1 de disponibilidade de nutrientes em função do pH do solo.
+
+    Baseia-se na agronomia clássica do pH:
+      • 6.0–7.0  -> "ponto doce": N, P, K e micronutrientes acessíveis (índice ~1)
+      • < 5.5    -> ácido: o fósforo fica retido e o alumínio/manganês tornam-se
+                    solúveis e tóxicos (índice cai rápido)
+      • > 7.5    -> alcalino: ferro, zinco e boro ficam insolúveis (carências)
+    Devolve também uma etiqueta e a carência dominante, para a narrativa.
+    """
+    if pH is None:
+        return {"indice": 0.6, "etiqueta": "pH desconhecido", "limitacao": None}
+    pH = float(pH)
+    if 6.0 <= pH <= 7.0:
+        idx, etq, lim = 1.0, "ponto doce (6,0–7,0)", None
+    elif pH < 6.0:
+        # 6.0 -> 1.0 ; 5.5 -> ~0.72 ; 4.5 -> ~0.3 ; 3.5 -> ~0.05
+        idx = max(0.05, 1.0 - (6.0 - pH) * 0.55)
+        etq = "ácido" if pH >= 5.0 else "muito ácido"
+        lim = "fósforo retido; alumínio/manganês tóxicos"
+    else:
+        # 7.0 -> 1.0 ; 7.5 -> ~0.78 ; 8.5 -> ~0.35 ; 9.0 -> ~0.13
+        idx = max(0.10, 1.0 - (pH - 7.0) * 0.43)
+        etq = "alcalino" if pH <= 8.0 else "muito alcalino"
+        lim = "ferro, zinco e boro insolúveis (carências)"
+    return {"indice": round(float(np.clip(idx, 0.0, 1.0)), 3),
+            "etiqueta": etq, "limitacao": lim}
+
+
 def escolher_metro(textura, dif, saude, pressao):
     """Compasso a partir da textura, restringido pelo nível e degradação."""
     permitidos = DIFICULDADE[dif]["metros"]
@@ -741,8 +770,15 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
     prob_silencio = float(np.clip(0.04 + max(0, eixo) * 0.18
                                   + pedregoso / 400 + n_minas * 0.02, 0.0, 0.30))
 
+    # --- pH -> DISPONIBILIDADE DE NUTRIENTES (agronomia): quão "florescente"
+    #     pode ser a vida. Acessível (pH 6–7) = harmonia mais rica e estável;
+    #     bloqueada (ácido/alcalino extremo) = mais tensão, menos florescimento.
+    nutri = disponibilidade_nutrientes(v["pH"])
+    nutri_idx = nutri["indice"]                       # 0..1
+
     # --- VIVACIDADE (carbono orgânico): densidade rítmica + staccato ---
-    vivacidade = float(np.clip(c_org / 40.0, 0.0, 1.0))  # 0..1
+    #     modulada pela disponibilidade de nutrientes (vida precisa de nutrientes)
+    vivacidade = float(np.clip((c_org / 40.0) * (0.55 + 0.45 * nutri_idx), 0.0, 1.0))
     prob_staccato = float(np.clip(0.10 + vivacidade * 0.55, 0.0, 0.7))
 
     # --- ÁGUA (AWC): comprimento das frases + tendência a notas longas ---
@@ -752,15 +788,21 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
     # --- DINÂMICA (azoto): energia vital ---
     vel_base = float(np.clip(0.45 + azoto * 0.12, 0.4, 0.85))
 
-    # --- HARMONIA (CEC): riqueza de acordes ---
+    # --- HARMONIA (CEC + nutrientes): riqueza de acordes ---
     prob_acorde = 0.0
     if env["permite_acordes"]:
-        prob_acorde = float(np.clip((cec - 60) / 350, 0.0, 0.4))
+        base_ac = float(np.clip((cec - 60) / 350, 0.0, 0.4))
+        prob_acorde = float(np.clip(base_ac * (0.5 + 0.5 * nutri_idx), 0.0, 0.4))
 
     # --- DEGRADAÇÃO humana: cromatismo (indústria) + dissonância ---
-    prob_cromatico = float(np.clip(n_pesada * 0.07 + max(0, (4 - saude)) * 0.03,
+    #     A indisponibilidade de nutrientes (pH adverso) soma alguma tensão
+    #     harmónica — o "stress" químico do solo torna-se stress musical.
+    stress_ph = (1.0 - nutri_idx)
+    prob_cromatico = float(np.clip(n_pesada * 0.07 + max(0, (4 - saude)) * 0.03
+                                   + stress_ph * 0.05,
                                    0.0, env["max_cromatismo"]))
-    prob_dissonancia = float(np.clip(contam * 0.03 + n_pesada * 0.04,
+    prob_dissonancia = float(np.clip(contam * 0.03 + n_pesada * 0.04
+                                     + stress_ph * 0.04,
                                      0.0, env["max_dissonancia"]))
 
     # --- REGISTO / peso: solo compacto soa mais grave. POR OITAVAS, para
@@ -829,6 +871,10 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
         "tintinnabuli": est["tintinnabuli"],
         "rubato": est.get("rubato", 0.0),
         "ornamentos": est.get("ornamentos", 0.0),
+        # disponibilidade de nutrientes (pH agronómico)
+        "nutri_indice": nutri_idx,
+        "nutri_etiqueta": nutri["etiqueta"],
+        "nutri_limitacao": nutri["limitacao"],
     }
 
 
@@ -1789,6 +1835,18 @@ def explicar(v, diag, agua, osm, tonal, metro, p):
             cartoes.append({"tipo": "solo", "titulo": "Argila → graus",
                 "texto": f"{argila:.0f}% de argila: melodia por notas vizinhas e ligada — um som coeso."})
 
+    # --- pH -> disponibilidade de nutrientes (agronomia) ---
+    if pH is not None and p.get("nutri_etiqueta"):
+        idx = p.get("nutri_indice", 0.6)
+        if idx >= 0.85:
+            cartoes.append({"tipo": "solo", "titulo": "pH → nutrientes acessíveis",
+                "texto": f"pH {pH:.1f} no ponto doce (6–7): azoto, fósforo e potássio "
+                         f"acessíveis às plantas — harmonia rica e estável, mais consonante."})
+        elif p.get("nutri_limitacao"):
+            cartoes.append({"tipo": "solo", "titulo": "pH → nutrientes bloqueados",
+                "texto": f"pH {pH:.1f} ({p['nutri_etiqueta']}): {p['nutri_limitacao']}. "
+                         f"A vida custa mais a florescer — menos acordes, mais tensão harmónica."})
+
     c_org = v["c_org"]
     if c_org is not None:
         if p["vivacidade"] > 0.5:
@@ -1905,6 +1963,33 @@ def _ler_opcoes():
             "instrumentos": instr, "seed": seed}
 
 
+def _tem_dados(valores):
+    return not all(v is None for v in valores.values())
+
+
+def solo_com_vizinhanca(lat, lon):
+    """Busca o solo em (lat, lon). Se não houver dados (costa, lago, célula
+    vazia), tenta pontos vizinhos numa pequena espiral (~5–25 km) e devolve o
+    primeiro com dados, junto do desvio aplicado. Evita o falhanço seco em
+    pontos perto de água ou em buracos de cobertura do SoilGrids."""
+    _, valores = solo_em_cache(lat, lon)
+    if _tem_dados(valores):
+        return valores, lat, lon, 0.0
+    # anéis crescentes (graus ~ 0.05°≈5,5km, 0.1°, 0.22°) em 8 direções
+    for d in (0.05, 0.1, 0.22):
+        for dlat, dlon in ((0, d), (0, -d), (d, 0), (-d, 0),
+                           (d, d), (d, -d), (-d, d), (-d, -d)):
+            la, lo = _normalizar_coords(lat + dlat, lon + dlon)
+            try:
+                _, vv = solo_em_cache(la, lo)
+            except requests.RequestException:
+                continue
+            if _tem_dados(vv):
+                desvio = ((dlat ** 2 + dlon ** 2) ** 0.5) * 111.0   # km aprox.
+                return vv, la, lo, round(desvio, 1)
+    return valores, lat, lon, None      # nada por perto
+
+
 @app.route("/gerar")
 def gerar():
     try:
@@ -1930,19 +2015,25 @@ def gerar():
     np.random.seed(semente)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        f_solo = pool.submit(solo_em_cache, lat, lon)
+        f_solo = pool.submit(solo_com_vizinhanca, lat, lon)
         f_osm = pool.submit(osm_em_cache, lat, lon, 10000)
         try:
-            _, valores = f_solo.result()
+            valores, lat_us, lon_us, desvio_km = f_solo.result()
         except requests.RequestException as e:
             return jsonify({"erro": f"Falha ao contactar SoilGrids: {e}"}), 502
         osm = f_osm.result()
 
-    if all(v is None for v in valores.values()):
+    if not _tem_dados(valores):
         return jsonify({
-            "erro": "Sem dados de solo nesta localização (oceano ou zona não coberta)",
-            "dica": "Tenta um ponto mais para o interior do continente.",
+            "erro": "Sem dados de solo nesta zona (mar, gelo ou cobertura em falta)",
+            "dica": "Arrasta o ponto para terra firme — idealmente zona agrícola ou floresta.",
         }), 404
+
+    # se tivemos de usar um ponto vizinho, regista o aviso para a UI
+    aviso_local = None
+    if desvio_km and desvio_km > 0:
+        aviso_local = (f"O ponto exato não tinha dados; usei um vizinho a "
+                       f"~{desvio_km:.0f} km com cobertura.")
 
     em_falta = [k for k, v in valores.items() if v is None]
     agua = calcular_retencao_agua(valores["areia"], valores["argila"], valores["c_org"])
@@ -1982,6 +2073,7 @@ def gerar():
             "avisos": diag["avisos"],
             "saude_score": diag["saude_score"],
             "valores_em_falta_substituidos": em_falta,
+            "aviso_local": aviso_local,
         },
         "pressao_humana": {
             "disponivel": osm.get("disponivel", False),
@@ -2014,6 +2106,9 @@ def gerar():
             "prob_acorde": round(p["prob_acorde"], 2),
             "prob_cromatico": round(p["prob_cromatico"], 2),
             "prob_dissonancia": round(p["prob_dissonancia"], 2),
+            "nutri_indice": round(p.get("nutri_indice", 0.6), 2),
+            "nutri_etiqueta": p.get("nutri_etiqueta"),
+            "nutri_limitacao": p.get("nutri_limitacao"),
             "explicacao": explicar(valores, diag, agua, osm, tonal, metro, p),
             # compatibilidade com o painel antigo
             "escala": tonal.modo,
