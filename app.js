@@ -10,6 +10,11 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
   ? `${location.protocol}//${location.hostname}:5000`
   : 'https://solosoil.onrender.com';
 
+// Carimbo de versão — abre a consola (F12) para confirmar que o app.js no ar
+// é o mais recente. Se vires uma data antiga, é cache: faz Ctrl+Shift+R.
+const APP_VERSION = "2026-06-01b · grupos+rubato+apogiaturas+nome-do-local";
+console.log("CuriouSoil frontend " + APP_VERSION);
+
 // O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
 // dar 502/503/504 enquanto arranca (até ~1 min). Esta função repete várias
 // vezes com recuo crescente, avisando que está "a acordar o servidor".
@@ -143,7 +148,8 @@ function montarInstrumentos(cont, familias) {
     barra.appendChild(fb);
 
     const g = document.createElement("div");
-    g.className = "familia-grupo chips"; g.dataset.fam = fam.id; g.hidden = true;
+    g.className = "familia-grupo chips"; g.dataset.fam = fam.id;
+    g.hidden = true; g.style.display = "none";   // inline vence o display:flex de .chips
     (fam.instrumentos || []).forEach(({ id, nome }) => {
       const b = document.createElement("button");
       b.type = "button"; b.className = "chip" + (id === "piano" ? " ativo" : "");
@@ -170,8 +176,11 @@ function abrirFamilia(famId) {
   const jaAberta = chip && chip.classList.contains("ativa");
   document.querySelectorAll("#lista-instrumentos .familia-chip").forEach((c) =>
     c.classList.toggle("ativa", !jaAberta && c.dataset.fam === famId));
-  document.querySelectorAll("#lista-instrumentos .familia-grupo").forEach((g) =>
-    g.hidden = jaAberta || (g.dataset.fam !== famId));
+  document.querySelectorAll("#lista-instrumentos .familia-grupo").forEach((g) => {
+    const mostrar = !jaAberta && g.dataset.fam === famId;
+    g.hidden = !mostrar;
+    g.style.display = mostrar ? "flex" : "none";   // inline garante o esconder
+  });
 }
 
 function atualizarResumoInstrumentos() {
@@ -1093,11 +1102,54 @@ function descarregar(blob, nome) {
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
+// Nome do local -> texto seguro para nome de ficheiro (sem acentos/espaços).
+function slugLocal(txt) {
+  return (txt || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")   // remove acentos
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 48) || "local";
+}
+
+// Constrói o nome do ficheiro a partir do local guardado (ou das coordenadas).
+function nomeFicheiro(slot) {
+  const s = estado[slot.toLowerCase()];
+  if (s && s.nome) return slugLocal(s.nome);
+  if (s && s.lat != null) return slugLocal(`lat${s.lat.toFixed(2)}-lon${s.lon.toFixed(2)}`);
+  return "local";
+}
+
+// Escolhe um nome curto e legível da resposta de geocodificação inversa.
+function nomeConciso(d) {
+  if (!d) return null;
+  const a = d.address || {};
+  return a.city || a.town || a.village || a.municipality || a.county ||
+         a.state || a.country || (d.display_name ? d.display_name.split(",")[0] : null);
+}
+
+// Geocodificação inversa (clique no mapa) -> nome do local, em segundo plano.
+async function reverseGeocode(lat, lon, slot) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}`
+              + `&format=json&accept-language=pt&zoom=10`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const nome = nomeConciso(d);
+    const s = estado[slot.toLowerCase()];
+    if (nome && s && s.lat === lat && s.lon === lon) {   // ainda é o mesmo ponto
+      s.nome = nome;
+      const el = document.getElementById(`coord-${slot.toLowerCase()}`);
+      if (el) el.textContent = `${nome} · Lat ${lat.toFixed(3)}  Lon ${lon.toFixed(3)}`;
+    }
+  } catch (_) { /* sem rede / falhou -> fica com as coordenadas */ }
+}
+
 function exportarMusicXML(slot) {
   const d = estado[slot.toLowerCase()]?.dados;
   if (!d?.exportacao?.musicxml) return;
   descarregar(new Blob([d.exportacao.musicxml], { type: 'application/vnd.recordare.musicxml+xml' }),
-    `curiousoil_${slot}.musicxml`);
+    `curiousoil-${nomeFicheiro(slot)}.musicxml`);
 }
 function exportarMIDI(slot) {
   const d = estado[slot.toLowerCase()]?.dados;
@@ -1105,7 +1157,7 @@ function exportarMIDI(slot) {
   const bin = atob(d.exportacao.midi_base64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  descarregar(new Blob([bytes], { type: 'audio/midi' }), `curiousoil_${slot}.mid`);
+  descarregar(new Blob([bytes], { type: 'audio/midi' }), `curiousoil-${nomeFicheiro(slot)}.mid`);
 }
 function bufferParaWav(ab) {
   const nCh = ab.numberOfChannels, sr = ab.sampleRate, len = ab.length;
@@ -1187,7 +1239,7 @@ async function exportarWAV(slot) {
       }
     }, dur);
     const native = ab.get ? ab.get() : ab;
-    descarregar(bufferParaWav(native), `curiousoil_${slot}_${Date.now()}.wav`);
+    descarregar(bufferParaWav(native), `curiousoil-${nomeFicheiro(slot)}.wav`);
     setEstadoMsg(slot, msgPronto(), false);
   } catch (e) {
     console.warn('WAV falhou', e);
@@ -1297,7 +1349,8 @@ function renderEstado() {
     if (dados) {
       const coordEl = document.getElementById(`coord-${s}`);
       if (coordEl) {
-        coordEl.textContent = `Lat: ${dados.lat.toFixed(3)}   Lon: ${dados.lon.toFixed(3)}`;
+        const base = `Lat: ${dados.lat.toFixed(3)}   Lon: ${dados.lon.toFixed(3)}`;
+        coordEl.textContent = dados.nome ? `${dados.nome} · ${base}` : base;
       }
       const estadoEl = document.getElementById(`estado-${s}`);
       if (estadoEl) {
@@ -1383,7 +1436,7 @@ async function selecionarPonto(lat, lon, opts = {}) {
     else if (estado.modo === 'single') slot = estado.a ? 'B' : 'A';
     else {
       // comparar: precisa de modal antes
-      abrirModalSubstituir(lat, lon, opts.eventoOriginal || null);
+      abrirModalSubstituir(lat, lon, opts.eventoOriginal || null, opts.nome || null);
       return;
     }
   }
@@ -1407,10 +1460,14 @@ async function selecionarPonto(lat, lon, opts = {}) {
   // gravar entrada no estado
   estado[slot.toLowerCase()] = {
     lat, lon,
+    nome: opts.nome || null,
     dados: null,
     estadoMsg: 'A buscar dados do solo...',
     carregando: true,
   };
+
+  // clique sem nome -> tenta obter o nome do local (geocodificação inversa)
+  if (!opts.nome) reverseGeocode(lat, lon, slot);
 
   renderEstado();
 
@@ -1465,7 +1522,7 @@ async function selecionarPonto(lat, lon, opts = {}) {
 // ---------------------------------------------------------------------
 //  MODAL POPOVER — Substituir A ou B?
 // ---------------------------------------------------------------------
-function abrirModalSubstituir(lat, lon, evento) {
+function abrirModalSubstituir(lat, lon, evento, nome) {
   fecharModalSubstituir();
   const wrap = document.querySelector('.mapa-wrap');
 
@@ -1503,7 +1560,7 @@ function abrirModalSubstituir(lat, lon, evento) {
     b.addEventListener('click', () => {
       const escolhido = b.dataset.slot;
       fecharModalSubstituir();
-      selecionarPonto(lat, lon, { slot: escolhido });
+      selecionarPonto(lat, lon, { slot: escolhido, nome });
     });
   });
   m.querySelector('.popover-cancelar').addEventListener('click', fecharModalSubstituir);
@@ -1591,7 +1648,7 @@ function selecionarResultadoProcura(i) {
   if (!r) return;
   inputProc.value = r.nome;
   fecharResultadosProcura();
-  selecionarPonto(r.lat, r.lon, { flyTo: true });
+  selecionarPonto(r.lat, r.lon, { flyTo: true, nome: r.nome });
 }
 
 async function chamarNominatim(query) {
@@ -1703,7 +1760,7 @@ function renderParesSugeridos() {
     chip.addEventListener('click', () => {
       const lat = parseFloat(chip.dataset.lat);
       const lon = parseFloat(chip.dataset.lon);
-      selecionarPonto(lat, lon, { flyTo: true });
+      selecionarPonto(lat, lon, { flyTo: true, nome: chip.textContent.trim() });
     });
   });
 }
