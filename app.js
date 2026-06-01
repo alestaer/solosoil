@@ -10,9 +10,10 @@ const API_URL = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname
   ? `${location.protocol}//${location.hostname}:5000`
   : 'https://solosoil.onrender.com';
 
-// O backend no Render (plano gratuito) adormece; a 1ª chamada pode dar 502.
-// Esta função repete algumas vezes, avisando que está "a acordar o servidor".
-async function gerarFetch(url, slot, tentativas = 4) {
+// O backend no Render (plano gratuito) adormece; as primeiras chamadas podem
+// dar 502/503/504 enquanto arranca (até ~1 min). Esta função repete várias
+// vezes com recuo crescente, avisando que está "a acordar o servidor".
+async function gerarFetch(url, slot, tentativas = 6) {
   for (let i = 0; i < tentativas; i++) {
     try {
       const r = await fetch(url);
@@ -21,7 +22,7 @@ async function gerarFetch(url, slot, tentativas = 4) {
     } catch (e) {
       if (i >= tentativas - 1) throw e;
       if (slot) setEstadoMsg(slot, 'A acordar o servidor… (até ~1 min na 1ª vez)', true);
-      await new Promise((res) => setTimeout(res, 2500 * (i + 1)));
+      await new Promise((res) => setTimeout(res, Math.min(9000, 3000 * (i + 1))));
     }
   }
   throw new Error('sem resposta do servidor');
@@ -78,10 +79,15 @@ function toggleChipInstrumento(b) {
 
 async function montarControlos() {
   const cont = document.getElementById("lista-instrumentos");
+  const contEst = document.getElementById("lista-estilos");
+  // Indicador enquanto o servidor (possivelmente a dormir) responde.
+  if (cont) cont.innerHTML = '<span class="def-hint">a preparar instrumentos…</span>';
+  if (contEst) contEst.innerHTML = '<span class="def-hint">a preparar…</span>';
   let familias = null, estilos = null, listaFlat = INSTRUMENTOS_FALLBACK;
   try {
-    const r = await fetch(`${API_URL}/instrumentos`);
-    const d = await r.json();
+    // Retry: aguarda o arranque do backend para os controlos virem completos
+    // (famílias + estilos), em vez de cair no modo degradado. Também o "acorda".
+    const d = await gerarFetch(`${API_URL}/instrumentos`, null, 6);
     if (d && Array.isArray(d.instrumentos) && d.instrumentos.length) listaFlat = d.instrumentos;
     if (d && Array.isArray(d.familias) && d.familias.length) familias = d.familias;
     if (d && Array.isArray(d.estilos) && d.estilos.length) estilos = d.estilos;
