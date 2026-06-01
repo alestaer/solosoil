@@ -370,11 +370,12 @@ ESTILOS = {
         "reverb_bonus": 0.0, "tintinnabuli": False,
     },
     "romantico": {
-        "nome": "Romântico", "crom_cap": 0.12, "diss_cap": 0.06,
-        "salto_mult": 1.15, "legato_bonus": 0.2, "staccato_mult": 0.4,
+        "nome": "Romântico", "crom_cap": 0.20, "diss_cap": 0.10,
+        "salto_mult": 1.05, "legato_bonus": 0.30, "staccato_mult": 0.18,
         "consonante": True, "harmonia_tipo": "setima", "baixo_padrao": "arpejo",
-        "prog_voc": "romantica", "tempo_mult": 0.92, "densidade_mult": 0.95,
-        "reverb_bonus": 0.12, "tintinnabuli": False,
+        "prog_voc": "romantica", "tempo_mult": 0.88, "densidade_mult": 0.9,
+        "reverb_bonus": 0.18, "tintinnabuli": False,
+        "rubato": 0.18, "ornamentos": 0.22,
     },
     "impressionista": {
         "nome": "Impressionista", "crom_cap": 0.0, "diss_cap": 0.0,
@@ -382,6 +383,7 @@ ESTILOS = {
         "consonante": True, "harmonia_tipo": "estendida", "baixo_padrao": "pedal",
         "prog_voc": "modal", "tempo_mult": 0.95, "densidade_mult": 0.9,
         "reverb_bonus": 0.28, "tintinnabuli": False,
+        "rubato": 0.10, "ornamentos": 0.06,
     },
     "minimal": {
         "nome": "Minimal", "crom_cap": 0.0, "diss_cap": 0.0,
@@ -815,6 +817,8 @@ def parametros_musicais(v, diag, agua, osm, dif, estilo="livre"):
         "baixo_padrao": est["baixo_padrao"],
         "prog_voc": est["prog_voc"],
         "tintinnabuli": est["tintinnabuli"],
+        "rubato": est.get("rubato", 0.0),
+        "ornamentos": est.get("ornamentos", 0.0),
     }
 
 
@@ -935,6 +939,54 @@ def _dinamica_de(intens):
     return "ff"
 
 
+def aplicar_rubato(partes, n_compassos, beats, seg_por_q, frase, env, forca):
+    """Rubato expressivo: deforma SÓ o tempo de execução (inicio_seg/duracao_seg
+    do áudio), deixando a partitura e o MIDI com o ritmo escrito intacto.
+    Abranda no fim de cada frase, alarga no clímax e faz um ritardando final;
+    é normalizado para a duração total se manter (média do andamento = 1)."""
+    if forca <= 0 or not partes:
+        return
+    import bisect
+    passo = 0.25
+    total_q = max(passo, n_compassos * beats)
+
+    def fator(q):
+        m = q / beats
+        pos = (m % frase) / frase                      # posição na frase (0..1)
+        f = 1.0
+        if pos >= 0.72:                                # ritardando no fim da frase
+            f += forca * 0.9 * (pos - 0.72) / 0.28
+        ci = min(len(env) - 1, max(0, int(m)))         # alargar no auge
+        f += forca * 0.45 * max(0.0, env[ci] - 0.65)
+        frac = m / max(1, n_compassos)                 # ritardando final
+        if frac >= 0.86:
+            f += forca * 1.1 * (frac - 0.86) / 0.14
+        return max(0.7, f)
+
+    # mapa cumulativo posição(q) -> segundos (com rubato)
+    qs, ts, q, t = [0.0], [0.0], 0.0, 0.0
+    while q < total_q - 1e-9:
+        t += passo * seg_por_q * fator(q)
+        q += passo
+        qs.append(q); ts.append(t)
+    escala = (total_q * seg_por_q) / ts[-1] if ts[-1] > 0 else 1.0  # preserva duração
+    ts = [x * escala for x in ts]
+
+    def warp(seg):
+        qq = seg / seg_por_q
+        i = max(0, min(len(qs) - 2, bisect.bisect_right(qs, qq) - 1))
+        q0, q1, t0, t1 = qs[i], qs[i + 1], ts[i], ts[i + 1]
+        return t0 if q1 <= q0 else t0 + (t1 - t0) * (qq - q0) / (q1 - q0)
+
+    for parte in partes:
+        for comp in parte["compassos"]:
+            for ev in comp:
+                ini = ev["inicio_seg"]
+                if not ev["is_rest"]:
+                    ev["duracao_seg"] = round(ev["duracao_seg"] * fator(ini / seg_por_q) * escala, 4)
+                ev["inicio_seg"] = round(warp(ini), 4)
+
+
 def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, prog=None, env=None):
     escala = tonal.escala_int
     tam = len(escala)
@@ -1010,6 +1062,28 @@ def gerar_melodia(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, p
                 vel = float(np.clip(vel * 1.12, 0.3, 1.0))
 
             sol = tonal.soletrar(midi, alteracao_extra)
+
+            # Apogiatura (ornamento romântico): uma nota longa ganha um apoio
+            # diatónico um grau acima, que resolve por grau descendente para a
+            # nota principal. Divide a nota em duas metades "limpas" (sem pontos).
+            meia = dur_q / 2.0
+            faz_apog = (p.get("ornamentos", 0.0) > 0 and not staccato and dur_q >= 1.0
+                        and meia in DUR_TABELA
+                        and not (ultima_da_frase and i == n_ev - 1)
+                        and np.random.random() < p["ornamentos"])
+            if faz_apog:
+                g_ap = int(np.clip(grau + 1, -amb // 2, amb // 2))
+                m_ap = int(np.clip(tonal.grau_para_midi(g_ap, oitava_base + oct_off),
+                                   lim_min, lim_max))
+                s_ap = tonal.soletrar(m_ap)
+                eventos.append(_evento_nota(m_ap, meia, min(1.0, vel * 1.04), False,
+                                            s_ap, tempo_q, seg_por_q, p["legato"], True))
+                tempo_q += meia
+                eventos.append(_evento_nota(midi, meia, max(0.3, vel * 0.88), False,
+                                            sol, tempo_q, seg_por_q, p["legato"], False))
+                tempo_q += meia
+                continue
+
             ev = _evento_nota(midi, dur_q, vel, staccato, sol, tempo_q, seg_por_q,
                               p["legato"], acento)
 
@@ -1183,7 +1257,8 @@ def gerar_baixo(tonal, p, metro, n_compassos, oitava_base, lim_min, lim_max, pro
                 ciclo = [grau_raiz, grau_raiz + 4, grau_raiz + 2, grau_raiz + 4]
                 graus = [ciclo[k % 4] for k in range(n)]
             elif padrao_nome == "arpejo":
-                ciclo = [grau_raiz, grau_raiz + 2, grau_raiz + 4, grau_raiz + 7]
+                # arpejo amplo (raiz–5ª–8ª–10ª), típico da mão esquerda de Chopin
+                ciclo = [grau_raiz, grau_raiz + 4, grau_raiz + 7, grau_raiz + 9]
                 graus = [ciclo[k % 4] for k in range(n)]
             else:  # caminhante (livre)
                 graus = [grau_raiz, grau_raiz + 4, grau_raiz + 2, grau_raiz + 4,
@@ -1618,6 +1693,8 @@ def montar_peca(valores, agua, diag, osm, opcoes):
             "compassos": comps,
         })
 
+    # Nota: o rubato é aplicado mais tarde (em /gerar), DEPOIS de a partitura e
+    # o MIDI serem construídos, para que esses fiquem com o ritmo escrito limpo.
     duracao_real = round(n_compassos * seg_por_compasso, 2)
     return tonal, p, metro, n_compassos, partes, duracao_real
 
@@ -1866,9 +1943,14 @@ def gerar():
 
     num, den = META_VEX[metro]
     env = envelope_intensidade(n_compassos)
+    # Partitura e MIDI usam o ritmo escrito (grelha limpa) — construídos primeiro.
     musicxml = construir_musicxml(partes, tonal, metro, env=env)
     midi_bytes = construir_midi(partes, p["bpm"], tonal, metro)
     midi_b64 = base64.b64encode(midi_bytes).decode("ascii")
+    # Rubato: deforma só os tempos de execução (pré-escuta no site + WAV).
+    if p.get("rubato", 0.0) > 0:
+        aplicar_rubato(partes, n_compassos, META_BATIDAS[metro], 60.0 / p["bpm"],
+                       p["frase_compassos"], env, p["rubato"])
     melodia_legado, baixo_legado = flatten_para_legado(partes)
 
     def arr(x, n=2):
